@@ -1,0 +1,75 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: tpo_postgres
+    restart: always
+
+    environment:
+      POSTGRES_USER: tpo_user
+      POSTGRES_PASSWORD: tpo_password
+      POSTGRES_DB: tinder_app
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  mongodb:
+    image: mongo:7
+    container_name: tpo_mongodb
+    restart: always
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: tpo_user
+      MONGO_INITDB_ROOT_PASSWORD: tpo_password
+
+    ports:
+      - "27017:27017"
+
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7
+    container_name: tpo_redis
+    restart: always
+
+    ports:
+      - "6379:6379"
+
+  cassandra:
+    image: cassandra:4.1
+    container_name: tpo_cassandra
+    restart: always
+
+    environment:
+      CASSANDRA_CLUSTER_NAME: tinder_cluster
+
+    ports:
+      - "9042:9042"
+
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+
+  neo4j:
+    image: neo4j:5
+    container_name: tpo_neo4j
+    restart: always
+
+    environment:
+      NEO4J_AUTH: neo4j/tpo_password
+
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  postgres_data:
+  mongo_data:
+  cassandra_data:
+  neo4j_data:
