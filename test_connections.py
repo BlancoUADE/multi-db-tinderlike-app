@@ -8,7 +8,7 @@ from neo4j import GraphDatabase
 def test_postgres():
     conn = connect(
         host="localhost",
-        port=5432,
+        port=5433,
         dbname="tinder_app",
         user="tpo_user",
         password="tpo_password"

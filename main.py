@@ -1,16 +1,14 @@
-import os
-
 import psycopg2
 from psycopg2 import OperationalError
 from psycopg2.extras import RealDictCursor
 
 
 DB_CONFIG = {
-	"host": os.getenv("POSTGRES_HOST", "localhost"),
-	"port": os.getenv("POSTGRES_PORT", "5432"),
-	"dbname": os.getenv("POSTGRES_DB", "tinder_app"),
-	"user": os.getenv("POSTGRES_USER", "tpo_user"),
-	"password": os.getenv("POSTGRES_PASSWORD", "tpo_password"),
+	"host": "127.0.0.1",
+	"port": 5433,
+	"dbname": "tinder_app",
+	"user": "tpo_user",
+	"password": "tpo_password",
 }
 
 
@@ -157,6 +155,54 @@ def login_user(conn):
 	print(format_user(selected_user))
 
 
+def reset_users(conn):
+	print("\nBorrar todos los usuarios")
+	confirmation = input('Escriba BORRAR para confirmar: ').strip()
+	if confirmation != "BORRAR":
+		print("Operación cancelada.")
+		return
+
+	with conn.cursor() as cur:
+		cur.execute("TRUNCATE TABLE users RESTART IDENTITY;")
+
+	conn.commit()
+	print("Se eliminaron todos los registros de la tabla users.")
+
+
+def reset_database(conn):
+	print("\nLimpiar esquemas de usuario")
+	confirmation = input('Escriba LIMPIAR para confirmar: ').strip()
+	if confirmation != "LIMPIAR":
+		print("Operación cancelada.")
+		return
+
+	with conn.cursor() as cur:
+		cur.execute(
+			"""
+			DO $$
+			DECLARE
+				schema_name text;
+			BEGIN
+				FOR schema_name IN
+					SELECT nspname
+					FROM pg_namespace
+					WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+					AND nspname NOT LIKE 'pg_toast%'
+					AND nspname NOT LIKE 'pg_temp_%'
+				LOOP
+					EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', schema_name);
+				END LOOP;
+
+				CREATE SCHEMA IF NOT EXISTS public;
+				GRANT ALL ON SCHEMA public TO public;
+			END $$;
+			"""
+		)
+
+	conn.commit()
+	print("Se limpiaron los esquemas de usuario. La base quedó lista para volver a crear tablas.")
+
+
 def main():
 	try:
 		conn = connect_db()
@@ -172,7 +218,9 @@ def main():
 			print("\n=== CLI Tinder App ===")
 			print("1. Registrar usuario")
 			print("2. Iniciar sesion")
-			print("3. Salir")
+			print("3. Borrar todos los usuarios")
+			print("4. Limpiar esquemas de usuario")
+			print("5. Salir")
 
 			option = input("Seleccione una opcion: ").strip()
 
@@ -181,6 +229,10 @@ def main():
 			elif option == "2":
 				login_user(conn)
 			elif option == "3":
+				reset_users(conn)
+			elif option == "4":
+				reset_database(conn)
+			elif option == "5":
 				print("Hasta luego.")
 				break
 			else:
