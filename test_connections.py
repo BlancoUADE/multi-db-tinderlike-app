@@ -1,7 +1,7 @@
 from psycopg2 import connect
 from pymongo import MongoClient
 import redis
-from cassandra.cluster import Cluster
+from cassandra import DependencyException
 from neo4j import GraphDatabase
 
 
@@ -18,6 +18,7 @@ def test_postgres():
     print(cur.fetchone()[0])
     cur.close()
     conn.close()
+    return True
 
 
 def test_mongodb():
@@ -27,15 +28,23 @@ def test_mongodb():
     result = db.test.find_one({"mensaje": "MongoDB OK"})
     print(result["mensaje"])
     client.close()
+    return True
 
 
 def test_redis():
     r = redis.Redis(host="localhost", port=6379, decode_responses=True)
     r.set("test", "Redis OK")
     print(r.get("test"))
+    return True
 
 
 def test_cassandra():
+    try:
+        from cassandra.cluster import Cluster
+    except DependencyException:
+        print("Cassandra driver no es compatible con Python 3.12+ en Windows. Usa Python 3.11.")
+        return False
+
     cluster = Cluster(["localhost"], port=9042)
     session = cluster.connect()
     session.execute("""
@@ -53,6 +62,7 @@ def test_cassandra():
     row = session.execute("SELECT mensaje FROM test WHERE id = 1").one()
     print(row.mensaje)
     cluster.shutdown()
+    return True
 
 
 def test_neo4j():
@@ -69,13 +79,20 @@ def test_neo4j():
         print(result.single()["mensaje"])
 
     driver.close()
+    return True
 
 
 if __name__ == "__main__":
-    test_postgres()
-    test_mongodb()
-    test_redis()
-    test_cassandra()
-    test_neo4j()
+    results = {
+        "PostgreSQL": test_postgres(),
+        "MongoDB": test_mongodb(),
+        "Redis": test_redis(),
+        "Cassandra": test_cassandra(),
+        "Neo4j": test_neo4j(),
+    }
 
-    print("Todas las conexiones funcionan correctamente.")
+    pendientes = [name for name, ok in results.items() if not ok]
+    if not pendientes:
+        print("Todas las conexiones funcionan correctamente.")
+    else:
+        print(f"Conexiones pendientes: {', '.join(pendientes)}.")
