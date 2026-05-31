@@ -7,8 +7,6 @@ from pymongo.errors import PyMongoError
 from redis.exceptions import RedisError
 from cassandra import DependencyException
 from neo4j.exceptions import ServiceUnavailable
-import importlib.util
-from pathlib import Path
 
 from src.database.connections import (
 	connect_postgres,
@@ -17,13 +15,9 @@ from src.database.connections import (
 	connect_cassandra,
 	connect_neo4j,
 )
+from src.database.postgres import ensure_postgres_schema
+from src.database.cassandra import ensure_cassandra_schema
 from src.cli import handlers
-
-# Cargar funciones helper de main_monolithic desde scripts/
-scripts_path = Path(__file__).parent.parent.parent / "scripts"
-spec = importlib.util.spec_from_file_location("main_monolithic", scripts_path / "main_monolithic.py")
-_main_mono = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(_main_mono)
 
 
 def main():
@@ -68,9 +62,8 @@ def main():
 
 	try:
 		# Inicializar esquemas
-		_main_mono.ensure_postgres_schema(conn)
-		_main_mono.ensure_cassandra_schema(cassandra_session)
-		_main_mono.ensure_neo4j_schema(neo4j_driver)
+		ensure_postgres_schema(conn)
+		ensure_cassandra_schema(cassandra_session)
 
 		while True:
 			print("\n=== CLI Tinder Multi-DB ===")
