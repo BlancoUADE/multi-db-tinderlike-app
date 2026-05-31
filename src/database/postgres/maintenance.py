@@ -27,7 +27,7 @@ def reset_all_databases(conn, mongo_db, redis_client, cassandra_session):
 	with conn.cursor() as cur:
 		try:
 			tables = ", ".join(tables_to_truncate)
-			cur.execute(f"TRUNCATE TABLE IF EXISTS {tables} RESTART IDENTITY CASCADE;")
+			cur.execute(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE;")
 			conn.commit()
 			print("✓ PostgreSQL limpiado")
 		except psycopg2.Error as e:
