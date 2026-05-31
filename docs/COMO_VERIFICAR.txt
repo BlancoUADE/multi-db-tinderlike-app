@@ -1,0 +1,164 @@
+═══════════════════════════════════════════════════════════════════════════════
+  ¿CÓMO CERCIORARME DE QUE LAS BASES DE DATOS ESTÁN CORRIENDO Y TIENEN DATOS?
+═══════════════════════════════════════════════════════════════════════════════
+
+Respuesta corta: Ejecuta estos 3 comandos en orden
+
+  1️⃣  python test_connections.py
+      → Verifica que las 5 DBs estén levantadas
+
+  2️⃣  python main.py
+      → Opción 19: Cargar datos demo
+
+  3️⃣  python verify_databases.py
+      → Muestra TODAS las tablas, colecciones y datos en cada DB
+
+═══════════════════════════════════════════════════════════════════════════════
+
+DETALLES:
+
+🐘 PostgreSQL (Relacional)
+   - 12 tablas: usuarios, intereses, usuario_intereses, fotos, likes, 
+     coincidencias, mensajes, bloqueos, eventos, asistencia_eventos, 
+     notificaciones, dias_festivos
+   - Contiene: Todos los datos con integridad referencial
+   - Comando: SELECT * FROM usuarios;
+   - Ve: Usuarios, intereses, likes, matches, mensajes
+
+🍃 MongoDB (Documentos)
+   - 1 colección: "perfiles"
+   - Contiene: Documentos JSON desnormalizados (perfil completo)
+   - Comando: db.perfiles.find();
+   - Ve: Perfiles con intereses y fotos embebidas
+
+🔴 Redis (Cache en memoria)
+   - Claves: notificaciones:sin_leer:{id}, likes:contador:{id}, etc.
+   - Contiene: Contadores, sesiones, datos con TTL
+   - Comando: KEYS * ; GET notificaciones:sin_leer:1
+   - Ve: Contadores actualizados en tiempo real
+
+🔷 Cassandra (Time-series)
+   - Keyspace: tinder_app
+   - Tabla: mensajes_timeline
+   - Contiene: Timeline de mensajes ordenada por tiempo
+   - Comando: SELECT * FROM tinder_app.mensajes_timeline;
+   - Ve: Mensajes en orden cronológico
+
+🔗 Neo4j (Grafo)
+   - Nodos: Usuario
+   - Relaciones: DIO_LIKE, MATCH, BLOQUEÓ, ENVIÓ_MENSAJE
+   - Contiene: Relaciones entre usuarios
+   - Comando: MATCH (u:Usuario) RETURN u;
+   - Ve: Nodos y conexiones de likes/matches
+
+═══════════════════════════════════════════════════════════════════════════════
+
+¿QUÉ SIGNIFICA "CADA DB TIENE UN TIPO DE DATO DISTINTO"?
+
+PostgreSQL       → Datos relacionales (ESTRUCTURA)
+MongoDB          → Documentos JSON (LECTURA RÁPIDA)
+Redis            → Clave-valor / Contadores (VELOCIDAD)
+Cassandra        → Time-series de eventos (ESCRITURA RÁPIDA)
+Neo4j            → Relaciones entre nodos (CONSULTAS DE GRAFO)
+
+Cada una es especialista en su tipo de dato y acceso.
+
+═══════════════════════════════════════════════════════════════════════════════
+
+¿SE RESPETÓ EL DER?
+
+SÍ. El DER contiene estas entidades:
+
+  USUARIOS
+  ├── Intereses (relación M:N)
+  ├── Fotos (1:N)
+  ├── Likes (1:N)
+  ├── Coincidencias (M:M)
+  ├── Mensajes (1:N)
+  ├── Bloqueos (1:N)
+  └── Notificaciones (1:N)
+
+Validar en PostgreSQL:
+  \d usuarios          → Ver columnas
+  \d fotos             → Ver tabla y FKs
+  SELECT constraint_name, constraint_type FROM information_schema.table_constraints 
+  WHERE table_name='usuarios';
+
+═══════════════════════════════════════════════════════════════════════════════
+
+PASO A PASO PARA VERIFICAR TODO:
+
+1. Levantar Docker
+   $ docker compose up -d
+
+2. Verificar conexiones
+   $ python test_connections.py
+   
+   Esperas:
+   ✅ PostgreSQL: conectado
+   ✅ MongoDB: conectado
+   ✅ Redis: conectado
+   (⚠️ Cassandra: pendiente - normal en Python 3.12+)
+   ✅ Neo4j: conectado
+
+3. Ejecutar CLI y cargar datos demo
+   $ python main.py
+   Opción 19: Cargar datos demo
+   
+   Esperas:
+   ✅ 5 usuarios creados
+   ✅ 8 intereses creados
+   ✅ 12 asignaciones de intereses
+   ✅ 10 fotos agregadas
+   ✅ 6 likes creados
+   ✅ 2 matches (likes mutuos)
+   ✅ 4 mensajes enviados
+   ✅ 1 evento creado
+   ✅ 2 asistencias registradas
+
+4. Verificar datos en TODAS las DBs
+   $ python verify_databases.py
+   
+   Esperas ver:
+   📊 PostgreSQL: 12 tablas, 5 usuarios, 8 intereses, 6 likes, 2 matches
+   🍃 MongoDB: 1 colección "perfiles" con 5 documentos
+   🔴 Redis: claves de notificaciones y contadores
+   🔷 Cassandra: mensajes_timeline con registros
+   🔗 Neo4j: 5 nodos Usuario, 8 relaciones DIO_LIKE/MATCH/BLOQUEÓ
+
+5. Explorar datos en CLI
+   $ python main.py
+   Opción 10: Listar usuarios → Ver usuarios
+   Opción 11: Ver perfil → Ver detalles
+   Opción 12: Ver likes → Ver likes
+   Opción 13: Ver matches → Ver coincidencias
+   Opción 14: Ver mensajes → Ver conversación
+   Opción 15: Ver eventos → Ver eventos
+   Opción 17: Analíticas → Ver 7 queries
+
+═══════════════════════════════════════════════════════════════════════════════
+
+DOCUMENTACIÓN IMPORTANTE:
+
+  📖 README.md                 - Setup y guía general
+  📖 MULTI_DB_STRATEGY.md      - POR QUÉ cada dato va en cada DB
+  📖 VERIFICATION_GUIDE.md     - Guía de verificación completa
+  📖 COMO_VERIFICAR.txt        - Este archivo
+
+═══════════════════════════════════════════════════════════════════════════════
+
+¿Algo no funciona?
+
+❌ "No se conecta a PostgreSQL"
+   docker ps → ver si los contenedores están UP
+   docker logs postgres → ver errores
+
+❌ "No hay datos después de cargar demo"
+   python main.py
+   → Opción 20: Limpiar bases (con rollback)
+   → Opción 19: Cargar demo de nuevo
+
+❌ "Cassandra error en Python 3.12"
+   Normal. Usa Python 3.11 si necesitas Cassandra, o ignora (la app sigue funcionando)
+
+═══════════════════════════════════════════════════════════════════════════════
