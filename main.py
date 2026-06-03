@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-CLI Tinder - Simplified PostgreSQL Entry Point
-==============================================
-Aplicación de citas simplificada con arquitectura basada en PostgreSQL.
+CLI Tinder Multi-DB - Entry Point
+=================================
+Aplicación de citas con arquitectura multi-base de datos consolidada.
 """
 
 import sys
@@ -41,7 +41,7 @@ def ask_bool(prompt):
 
 # --- HANDLERS ---
 
-def register_user(conn):
+def register_user(conn, mongo_db, neo4j_driver):
     print("\nRegistro de usuario")
     nombre = ask_text("Nombre: ")
     edad = ask_int("Edad: ", minimum=1)
@@ -51,7 +51,7 @@ def register_user(conn):
     pref_edad_min = ask_int("Preferencia de Edad Mínima: ", minimum=1)
     pref_edad_max = ask_int("Preferencia de Edad Máxima: ", minimum=pref_edad_min)
 
-    user_id = db.register_user(conn, nombre, edad, genero, ubicacion, biografia, pref_edad_min, pref_edad_max)
+    user_id = db.register_user(conn, mongo_db, neo4j_driver, nombre, edad, genero, ubicacion, biografia, pref_edad_min, pref_edad_max)
     if user_id:
         print(f"Usuario registrado correctamente. ID asignado: {user_id}")
 
@@ -61,43 +61,43 @@ def create_interest(conn):
     interest_id = db.create_interest(conn, nombre)
     print(f"Interés registrado. ID asignado: {interest_id}")
 
-def assign_interest(conn):
+def assign_interest(conn, mongo_db):
     print("\nAsignar interés a usuario")
     user_id = ask_int("ID de usuario: ", minimum=1)
     interest_name = ask_text("Nombre del interés: ")
-    db.assign_interest(conn, user_id, interest_name)
+    db.assign_interest(conn, mongo_db, user_id, interest_name)
     print("Interés asignado correctamente.")
 
-def add_photo(conn):
+def add_photo(conn, mongo_db):
     print("\nAgregar foto")
     user_id = ask_int("ID de usuario: ", minimum=1)
     url = ask_text("URL de la foto: ")
     is_main = ask_bool("¿Es foto principal?")
-    db.add_photo(conn, user_id, url, is_main)
+    db.add_photo(conn, mongo_db, user_id, url, is_main)
     print("Foto agregada correctamente.")
 
-def create_like(conn):
+def create_like(conn, redis_client, neo4j_driver):
     print("\nDar like")
     origin = ask_int("Tu ID de usuario: ", minimum=1)
     dest = ask_int("ID del usuario que te gustó: ", minimum=1)
-    like_id = db.create_like(conn, origin, dest)
+    like_id = db.create_like(conn, redis_client, neo4j_driver, origin, dest)
     if like_id:
         print(f"Like registrado. ID: {like_id}")
 
-def create_match_manual(conn):
+def create_match_manual(conn, redis_client, neo4j_driver):
     print("\nForzar Match (Coincidencia)")
     u1 = ask_int("ID Usuario 1: ", minimum=1)
     u2 = ask_int("ID Usuario 2: ", minimum=1)
-    match_id = db.create_match(conn, u1, u2)
+    match_id = db.create_match(conn, redis_client, neo4j_driver, u1, u2)
     if match_id:
         print(f"Coincidencia registrada. ID: {match_id}")
 
-def send_message(conn):
+def send_message(conn, redis_client, cassandra_session):
     print("\nEnviar mensaje")
     match_id = ask_int("ID de la coincidencia: ", minimum=1)
     sender_id = ask_int("Tu ID de usuario: ", minimum=1)
     content = ask_text("Mensaje: ")
-    db.send_message(conn, match_id, sender_id, content)
+    db.send_message(conn, redis_client, cassandra_session, match_id, sender_id, content)
     print("Mensaje enviado.")
 
 def list_current_users(conn):
@@ -159,10 +159,10 @@ def view_matches(conn):
     for row in matches:
         print(f"[{row['id_coincidencia']}] {row['usuario1']} ↔ {row['usuario2']} ({row['fecha_coincidencia']})")
 
-def view_messages(conn):
+def view_messages(conn, cassandra_session):
     print("\nVer mensajes")
     match_id = ask_int("ID de la coincidencia: ", minimum=1)
-    messages = db.get_match_messages(conn, match_id)
+    messages = db.get_match_messages(conn, cassandra_session, match_id)
 
     if not messages:
         print("No hay mensajes en esta conversación.")
@@ -172,9 +172,42 @@ def view_messages(conn):
     for msg in messages:
         print(f"{msg['emisor']}: {msg['contenido']} ({msg['fecha_envio']})")
 
-def seed_demo_data(conn):
+def view_notifications(conn, redis_client):
+    print("\nVer notificaciones")
+    user_id = ask_int("Tu ID de usuario: ", minimum=1)
+    
+    unread_count = db.get_unread_count(redis_client, user_id)
+    print(f"\nNotificaciones no leídas: {unread_count}")
+
+    with conn.cursor(cursor_factory=db.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT id_notificacion, tipo, fecha_creacion, leida
+            FROM notificaciones
+            WHERE id_usuario = %s
+            ORDER BY fecha_creacion DESC
+            LIMIT 20
+            """,
+            (user_id,),
+        )
+        notificaciones = cur.fetchall()
+
+    if not notificaciones:
+        print("No hay notificaciones.")
+        return
+
+    print("\nÚltimas 20 notificaciones:")
+    for row in notificaciones:
+        leida_tag = "(leída)" if row['leida'] else "(NO LEÍDA)"
+        print(f"[{row['id_notificacion']}] {row['tipo']} {leida_tag} ({row['fecha_creacion']})")
+        
+    # Reset count
+    redis_key = f"user:{user_id}:unread_notifications"
+    redis_client.set(redis_key, 0)
+
+
+def seed_demo_data(conn, mongo_db, neo4j_driver, redis_client, cassandra_session):
     print("\nCargando datos demo...")
-    from datetime import datetime as dt
 
     users = [
         ("Sofia", 25, "F", "Buenos Aires", "Amante del cine", 22, 30),
@@ -248,6 +281,18 @@ def seed_demo_data(conn):
 
     conn.commit()
 
+    # Sync to MongoDB
+    for user_id in user_ids:
+        try: db.sync_user_profile(conn, mongo_db, user_id)
+        except: pass
+
+    # Sync to Neo4j
+    try:
+        with neo4j_driver.session() as session:
+            for user_id in user_ids:
+                session.run("MERGE (u:User {id: $id})", id=user_id)
+    except: pass
+
     # Create demo likes
     likes = [
         (user_ids[0], user_ids[1]),
@@ -263,14 +308,20 @@ def seed_demo_data(conn):
                 INSERT INTO likes (id_usuario_origen, id_usuario_destino)
                 VALUES (%s, %s)
                 ON CONFLICT DO NOTHING
+                RETURNING id_like
                 """,
                 (origin, dest),
             )
-        conn.commit()
+            row = cur.fetchone()
+        if row:
+            conn.commit()
+            db.create_notification(conn, redis_client, dest, "like", id_like=row[0])
+        else:
+            conn.rollback()
 
-    # Create matches
-    match_id = db.create_match(conn, user_ids[0], user_ids[1])
-    db.create_match(conn, user_ids[0], user_ids[2])
+    # Create match
+    match_id = db.create_match(conn, redis_client, neo4j_driver, user_ids[0], user_ids[1])
+    db.create_match(conn, redis_client, neo4j_driver, user_ids[0], user_ids[2])
 
     if match_id:
         with conn.cursor() as cur:
@@ -278,15 +329,28 @@ def seed_demo_data(conn):
                 """
                 INSERT INTO mensajes (id_coincidencia, id_emisor, contenido)
                 VALUES (%s, %s, %s)
+                RETURNING id_mensaje, fecha_envio
                 """,
                 (match_id, user_ids[0], "Hola!"),
             )
+            message_id, sent_at = cur.fetchone()
         conn.commit()
+        try:
+            db.ensure_cassandra_schema(cassandra_session)
+            cassandra_session.set_keyspace(db.CASSANDRA_KEYSPACE)
+            cassandra_session.execute(
+                "INSERT INTO mensajes_por_coincidencia (id_coincidencia, fecha_envio, id_mensaje, id_emisor, contenido) VALUES (%s, %s, %s, %s, %s)",
+                (match_id, sent_at, message_id, user_ids[0], "Hola!"),
+            )
+        except: pass
+        
+        db.create_notification(conn, redis_client, user_ids[1], "mensaje", id_mensaje=message_id)
 
     print("Datos demo cargados.")
 
-def reset_all_databases(conn):
-    db.reset_database(conn)
+
+def reset_all_databases(conn, mongo_db, redis_client, cassandra_session):
+    db.reset_database(conn, mongo_db, redis_client, cassandra_session)
 
 # --- MENU & ENTRY POINT ---
 
@@ -298,18 +362,35 @@ def check_environment():
         sys.exit(1)
 
 def main():
-    try:
-        conn = db.connect_postgres()
+    try: conn = db.connect_postgres()
     except OperationalError as error:
-        print("No se pudo conectar a Postgres.")
-        print(error)
-        return
+        print("No se pudo conectar a Postgres."); return
+
+    try:
+        mongo_client = db.connect_mongo()
+        mongo_db = mongo_client["tinder_app"]
+    except Exception as error:
+        print("No se pudo conectar a MongoDB."); return
+
+    try: redis_client = db.connect_redis()
+    except Exception as error:
+        print("No se pudo conectar a Redis."); return
+
+    try: cluster, cassandra_session = db.connect_cassandra()
+    except Exception as error:
+        print("No se pudo conectar a Cassandra."); return
+
+    try: neo4j_driver = db.connect_neo4j()
+    except Exception as error:
+        print("No se pudo conectar a Neo4j."); return
 
     try:
         db.ensure_postgres_schema(conn)
+        try: db.ensure_cassandra_schema(cassandra_session)
+        except: pass
 
         while True:
-            print("\n=== CLI Tinder (Simplified) ===")
+            print("\n=== CLI Tinder Multi-DB (Consolidated) ===")
             print("\n--- Registrar ---")
             print("1. Registrar usuario")
             print("2. Crear interés")
@@ -325,44 +406,31 @@ def main():
             print("10. Ver likes")
             print("11. Ver coincidencias (matches)")
             print("12. Ver mensajes de un match")
+            print("13. Ver notificaciones")
             print("\n--- Demo ---")
-            print("13. Cargar datos demo")
-            print("14. Limpiar base de datos")
-            print("15. Salir")
+            print("14. Cargar datos demo")
+            print("15. Limpiar base de datos")
+            print("16. Salir")
 
             option = input("Seleccione una opción: ").strip()
 
-            if option == "1":
-                register_user(conn)
-            elif option == "2":
-                create_interest(conn)
-            elif option == "3":
-                assign_interest(conn)
-            elif option == "4":
-                add_photo(conn)
-            elif option == "5":
-                create_like(conn)
-            elif option == "6":
-                create_match_manual(conn)
-            elif option == "7":
-                send_message(conn)
-            elif option == "8":
-                list_current_users(conn)
-            elif option == "9":
-                view_user_profile(conn)
-            elif option == "10":
-                view_likes(conn)
-            elif option == "11":
-                view_matches(conn)
-            elif option == "12":
-                view_messages(conn)
-            elif option == "13":
-                seed_demo_data(conn)
-            elif option == "14":
-                reset_all_databases(conn)
-            elif option == "15":
-                print("Hasta luego.")
-                break
+            if option == "1": register_user(conn, mongo_db, neo4j_driver)
+            elif option == "2": create_interest(conn)
+            elif option == "3": assign_interest(conn, mongo_db)
+            elif option == "4": add_photo(conn, mongo_db)
+            elif option == "5": create_like(conn, redis_client, neo4j_driver)
+            elif option == "6": create_match_manual(conn, redis_client, neo4j_driver)
+            elif option == "7": send_message(conn, redis_client, cassandra_session)
+            elif option == "8": list_current_users(conn)
+            elif option == "9": view_user_profile(conn)
+            elif option == "10": view_likes(conn)
+            elif option == "11": view_matches(conn)
+            elif option == "12": view_messages(conn, cassandra_session)
+            elif option == "13": view_notifications(conn, redis_client)
+            elif option == "14": seed_demo_data(conn, mongo_db, neo4j_driver, redis_client, cassandra_session)
+            elif option == "15": reset_all_databases(conn, mongo_db, redis_client, cassandra_session)
+            elif option == "16":
+                print("Hasta luego."); break
             else:
                 print("Opción inválida.")
     except KeyboardInterrupt:
@@ -375,6 +443,10 @@ def main():
         sys.exit(1)
     finally:
         conn.close()
+        mongo_client.close()
+        redis_client.close()
+        cluster.shutdown()
+        neo4j_driver.close()
 
 if __name__ == "__main__":
     check_environment()
