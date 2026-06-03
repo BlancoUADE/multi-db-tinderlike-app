@@ -1,28 +1,15 @@
-# CLI Tinder Multi-DB
+# CLI Tinder (Simplified)
 
-Aplicación de citas con arquitectura multi-base de datos (PostgreSQL, MongoDB, Redis, Cassandra, Neo4j).
+Aplicación de citas con arquitectura simplificada basada únicamente en PostgreSQL.
 
 ## Estructura
 
 ```
-├── main.py                 # Entry point (36 líneas)
-├── config.py              # Configuración centralizada
-├── docker-compose.yml     # Servicios de BD
-├── requirements.txt       # Dependencias Python
-├── .env.example          # Variables de entorno
-│
-├── src/                   # Código fuente
-│   ├── database/          # Conexiones a BD
-│   ├── cli/              # Interfaz de usuario
-│   ├── models/           # Entidades
-│   └── analytics/        # Analíticas
-│
-├── scripts/              # Utilidades
-│   ├── main_monolithic.py    # Código original
-│   ├── verify_databases.py   # Verificar BD
-│   └── test_connections.py   # Probar conexiones
-│
-└── docs/                 # Documentación
+├── main.py                 # Entry point y CLI
+├── database.py             # Lógica de base de datos
+├── docker-compose.yml      # Servicio de PostgreSQL
+├── requirements.txt        # Dependencias Python
+└── docs/                   # Documentación original
 ```
 
 ## Instalación
@@ -43,13 +30,6 @@ pip install -r requirements.txt
 
 ```bash
 python main.py
-```
-
-## Utilidades
-
-```bash
-python scripts/test_connections.py      # Verificar conexiones
-python scripts/verify_databases.py       # Ver esquemas y datos
 ```
 
 Ver documentación completa en `docs/README.md`
