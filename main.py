@@ -257,6 +257,29 @@ def view_notifications(conn, redis_client):
         print("Notificaciones marcadas como leidas y contador Redis reiniciado.")
 
 
+def recommend_profiles(conn, mongo_db, neo4j_driver):
+    print("\nRecomendar perfiles")
+    user_id = ask_int("ID de usuario: ", minimum=1)
+    limit = ask_int("Cantidad maxima de recomendaciones: ", minimum=1)
+    recommendations = db.recommend_profiles(conn, mongo_db, neo4j_driver, user_id, limit)
+    if not recommendations:
+        print("No hay recomendaciones disponibles para ese usuario.")
+        return
+
+    print("\nRecomendaciones generadas con Neo4j y perfiles leidos desde MongoDB:")
+    for item in recommendations:
+        profile = item["perfil"]
+        main_photo = next((photo for photo in profile.get("fotos", []) if photo.get("es_principal")), None)
+        shared = ", ".join(item["intereses_compartidos"])
+        print("\n---")
+        print(f"ID: {profile['id_usuario']}")
+        print(f"Nombre: {profile['nombre']} ({profile['edad']} anios, {profile['ubicacion']})")
+        print(f"Bio: {profile['biografia']}")
+        print(f"Intereses compartidos ({item['intereses_en_comun']}): {shared}")
+        if main_photo:
+            print(f"Foto principal: {main_photo['url_archivo']}")
+
+
 def seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver):
     print("\nCargando datos demo. Esto limpia las bases antes de cargar.")
     db.seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
@@ -345,9 +368,10 @@ def main():
             print("15. Ver matches")
             print("16. Ver mensajes")
             print("17. Ver notificaciones")
-            print("18. Cargar datos demo")
-            print("19. Limpiar todas las bases")
-            print("20. Salir")
+            print("18. Recomendar perfiles")
+            print("19. Cargar datos demo")
+            print("20. Limpiar todas las bases")
+            print("21. Salir")
 
             option = input("Seleccione una opcion: ").strip()
 
@@ -386,10 +410,12 @@ def main():
             elif option == "17":
                 view_notifications(conn, redis_client)
             elif option == "18":
-                seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
+                recommend_profiles(conn, mongo_db, neo4j_driver)
             elif option == "19":
-                reset_all_databases(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
+                seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
             elif option == "20":
+                reset_all_databases(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
+            elif option == "21":
                 print("Hasta luego.")
                 break
             else:

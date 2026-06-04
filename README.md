@@ -50,12 +50,13 @@ Neo4j OK
 ## Demo sugerida
 
 1. Ejecutar `python main.py`.
-2. Elegir `18. Cargar datos demo`.
+2. Elegir `19. Cargar datos demo`.
 3. Listar usuarios, likes y matches.
-4. Ver mensajes de la coincidencia `1`; se leen desde Cassandra si hay datos.
-5. Hacer login con un usuario para crear una sesion Redis con TTL.
-6. Ver TTL y luego hacer logout.
-7. Correr `python tests\verify_databases.py` para mostrar datos por motor.
+4. Elegir `18. Recomendar perfiles` para ver candidatos calculados por Neo4j y tarjetas leidas desde MongoDB.
+5. Ver mensajes de la coincidencia `1`; se leen desde Cassandra si hay datos.
+6. Hacer login con un usuario para crear una sesion Redis con TTL.
+7. Ver TTL y luego hacer logout.
+8. Correr `python tests\verify_databases.py` para mostrar datos por motor.
 
 ## Verificacion rapida
 

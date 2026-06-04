@@ -145,6 +145,16 @@ Justificacion:
 2. Si el usuario existe, Redis crea `session:{id_usuario}:{token}` con TTL.
 3. Logout elimina esa clave Redis.
 
+### Recomendacion de perfiles
+
+1. Neo4j busca usuarios con intereses compartidos mediante `TIENE_INTERES`.
+2. Neo4j excluye usuarios ya likeados, bloqueados o matcheados.
+3. MongoDB trae `perfiles_usuarios` para esos candidatos.
+4. El CLI muestra una tarjeta completa: nombre, edad, ubicacion, bio, intereses compartidos y foto principal.
+
+Este flujo combina dos bases NoSQL en una misma consulta funcional: Neo4j decide
+la relacion/relevancia y MongoDB resuelve la lectura documental del perfil.
+
 ## Criterio de defensa
 
 El usuario no sabe de donde salen los datos. El CLI muestra acciones del dominio:

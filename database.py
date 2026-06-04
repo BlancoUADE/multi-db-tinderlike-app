@@ -790,6 +790,77 @@ def get_match_messages(conn, cassandra_session, match_id):
         return [dict(row, origen="PostgreSQL") for row in cur.fetchall()]
 
 
+def recommend_profiles(conn, mongo_db, neo4j_driver, user_id, limit=5):
+    if not ensure_user_exists(conn, user_id):
+        return []
+
+    with neo4j_driver.session() as session:
+        records = session.run(
+            """
+            MATCH (me:Usuario {id_usuario: $user_id})-[:TIENE_INTERES]->(interest:Interes)<-[:TIENE_INTERES]-(candidate:Usuario)
+            WHERE candidate.id_usuario <> me.id_usuario
+              AND NOT (me)-[:DIO_LIKE]->(candidate)
+              AND NOT (me)-[:MATCH]-(candidate)
+              AND NOT (me)-[:BLOQUEO]->(candidate)
+              AND NOT (candidate)-[:BLOQUEO]->(me)
+            RETURN
+                candidate.id_usuario AS id_usuario,
+                count(DISTINCT interest) AS intereses_en_comun,
+                collect(DISTINCT interest.nombre) AS intereses_compartidos
+            ORDER BY intereses_en_comun DESC, id_usuario ASC
+            LIMIT $limit
+            """,
+            user_id=user_id,
+            limit=limit,
+        )
+        candidates = [dict(record) for record in records]
+
+    if not candidates:
+        return []
+
+    candidate_ids = [candidate["id_usuario"] for candidate in candidates]
+    profiles = {
+        profile["id_usuario"]: profile
+        for profile in mongo_db[MONGO_PROFILE_COLLECTION].find(
+            {"id_usuario": {"$in": candidate_ids}},
+            {"_id": 0},
+        )
+    }
+
+    missing_profile_ids = [candidate_id for candidate_id in candidate_ids if candidate_id not in profiles]
+    for missing_id in missing_profile_ids:
+        try:
+            sync_user_profile(conn, mongo_db, missing_id)
+        except Exception as error:
+            warn("MongoDB/perfil recomendado", error)
+
+    if missing_profile_ids:
+        profiles.update(
+            {
+                profile["id_usuario"]: profile
+                for profile in mongo_db[MONGO_PROFILE_COLLECTION].find(
+                    {"id_usuario": {"$in": missing_profile_ids}},
+                    {"_id": 0},
+                )
+            }
+        )
+
+    recommendations = []
+    for candidate in candidates:
+        profile = profiles.get(candidate["id_usuario"])
+        if not profile:
+            continue
+        recommendations.append(
+            {
+                "id_usuario": candidate["id_usuario"],
+                "intereses_en_comun": candidate["intereses_en_comun"],
+                "intereses_compartidos": sorted(candidate["intereses_compartidos"]),
+                "perfil": profile,
+            }
+        )
+    return recommendations
+
+
 def create_session(conn, mongo_db, redis_client, user_id, device_name):
     user = fetch_user(conn, user_id)
     token = str(uuid.uuid4())

@@ -33,9 +33,10 @@ python main.py
 15. Ver matches
 16. Ver mensajes
 17. Ver notificaciones
-18. Cargar datos demo
-19. Limpiar todas las bases
-20. Salir
+18. Recomendar perfiles
+19. Cargar datos demo
+20. Limpiar todas las bases
+21. Salir
 
 ## Scripts de verificacion
 

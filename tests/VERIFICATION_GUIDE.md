@@ -40,6 +40,7 @@ Neo4j:
 
 - nodos `Usuario`, `Interes`, `Evento`
 - relaciones `TIENE_INTERES`, `DIO_LIKE`, `MATCH`, `BLOQUEO`, `ASISTE`
+- la opcion `18. Recomendar perfiles` combina candidatos de Neo4j con tarjetas de MongoDB
 
 ## Consultas utiles
 
@@ -66,6 +67,18 @@ Neo4j:
 MATCH (u:Usuario)-[r]->(x)
 RETURN u, r, x
 LIMIT 100;
+```
+
+Recomendacion por intereses compartidos:
+
+```cypher
+MATCH (me:Usuario {id_usuario: 1})-[:TIENE_INTERES]->(i:Interes)<-[:TIENE_INTERES]-(candidate:Usuario)
+WHERE NOT (me)-[:DIO_LIKE]->(candidate)
+  AND NOT (me)-[:MATCH]-(candidate)
+  AND NOT (me)-[:BLOQUEO]->(candidate)
+  AND NOT (candidate)-[:BLOQUEO]->(me)
+RETURN candidate.nombre, count(i) AS intereses_en_comun, collect(i.nombre) AS cuales
+ORDER BY intereses_en_comun DESC;
 ```
 
 Redis:
