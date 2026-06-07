@@ -316,12 +316,13 @@ class TinderCLI:
                         print("              ¡¡ES UN MATCH!! 🎉")
                         print("*"*50)
                         print(f"¡Tú y {candidate['nombre']} se gustan mutuamente!")
+                        print("[INFO] Nuevo match generado.")
                         print("*"*50)
                     else:
-                        print(f"\n[INFO] Le diste Like a {candidate['nombre']}.")
+                        print("\n[INFO] Like registrado.")
                 elif op == "2":
                     self.service.hacer_swipe(self.session_token, candidate["user_id"], positive=False)
-                    print(f"\n[INFO] Descartaste a {candidate['nombre']}.")
+                    print("\n[INFO] Perfil descartado.")
                 elif op == "3":
                     print("\nSaltando al siguiente candidato...")
                 else:
@@ -360,7 +361,7 @@ class TinderCLI:
         
         # Load and print history
         try:
-            msgs = self.service.obtener_mensajes(self.session_token, match_id)
+            msgs = self.service.ver_conversacion(self.session_token, match_id)
             for m in msgs:
                 # Format time
                 time_str = m["timestamp"].strftime("%H:%M") if m.get("timestamp") else ""
@@ -377,8 +378,7 @@ class TinderCLI:
                 
             try:
                 self.service.enviar_mensaje(self.session_token, match_id, text)
-                # print sent confirmation
-                print("[Mensaje enviado]")
+                print("\n[INFO] Mensaje enviado.")
             except Exception as e:
                 print(f"[ERROR] No se pudo enviar el mensaje: {e}")
 
@@ -444,7 +444,7 @@ class TinderCLI:
         
         try:
             event_id = self.service.crear_evento(self.session_token, titulo, desc, ub, date_str)
-            print(f"\n[ÉXITO] Evento social creado con ID: {event_id}")
+            print(f"\n[ÉXITO] Evento creado con ID: {event_id}")
         except Exception as e:
             print(f"\n[ERROR] No se pudo crear el evento: {e}")
 
@@ -453,7 +453,7 @@ class TinderCLI:
         event_id = self.ask_int("Ingrese el ID del evento al que desea asistir: ", minimum=1)
         try:
             self.service.inscribirse_evento(self.session_token, event_id)
-            print(f"\n[ÉXITO] Inscripción registrada correctamente. Ya puedes asistir al evento.")
+            print("\n[ÉXITO] Inscripción confirmada.")
         except Exception as e:
             print(f"\n[ERROR] No se pudo inscribir: {e}")
 

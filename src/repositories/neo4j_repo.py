@@ -196,3 +196,26 @@ class Neo4jRepository:
         """
         with self.driver.session() as session:
             session.run(query, user_id=user_id, event_id=event_id)
+
+    def prioritize_events_by_interests(self, user_id, event_ids):
+        """
+        Prioritize event IDs based on the count of shared interests with attendees of those events.
+        """
+        if not event_ids:
+            return []
+        query = """
+        MATCH (u:Usuario {id: $user_id})
+        OPTIONAL MATCH (u)-[:TIENE_INTERES]->(i:Interes)
+        WITH u, collect(i) AS user_interests
+        MATCH (e:Evento) WHERE e.id IN $event_ids
+        OPTIONAL MATCH (other:Usuario)-[:ASISTE_A]->(e)
+        WHERE other.id <> $user_id
+        OPTIONAL MATCH (other)-[:TIENE_INTERES]->(shared:Interes)
+        WHERE shared IN user_interests
+        WITH e, count(shared) AS score
+        RETURN e.id AS id, score
+        ORDER BY score DESC
+        """
+        with self.driver.session() as session:
+            res = session.run(query, user_id=user_id, event_ids=event_ids)
+            return [row["id"] for row in res]

@@ -22,17 +22,28 @@ class MongoRepository:
             "updated_at": datetime.utcnow()
         }
         self.db.perfiles.insert_one(profile)
+        
+        # Opcionalmente registrar un log de la creacion del perfil en MongoDB
+        self.db.historial_cambios_perfil.insert_one({
+            "user_id": user_id,
+            "timestamp": datetime.utcnow(),
+            "campo_modificado": "perfil",
+            "valor_anterior": None,
+            "valor_nuevo": "creacion_inicial"
+        })
 
     def delete_profile(self, user_id):
         """Delete profile document for a user (used for rollback)."""
         self.db.perfiles.delete_one({"user_id": user_id})
 
-    def log_login_attempt(self, user_id, success, ip="127.0.0.1"):
-        """Log a login attempt (successful or failed)."""
+    def log_login_attempt(self, email, user_id, success, motivo, ip="127.0.0.1"):
+        """Log a login attempt in MongoDB."""
         attempt = {
-            "user_id": user_id,
-            "timestamp": datetime.utcnow(),
+            "email": email,
+            "user_id": user_id,  # can be None
             "exito": success,
+            "timestamp": datetime.utcnow(),
+            "motivo": motivo,
             "ip": ip
         }
         self.db.historial_login.insert_one(attempt)
@@ -41,7 +52,7 @@ class MongoRepository:
         """Retrieve user's profile document."""
         return self.db.perfiles.find_one({"user_id": user_id})
 
-    def update_profile_fields(self, user_id, biografia, caracteristicas, preferencias):
+    def update_profile_fields(self, user_id, biografia, caracteristicas, preferencias, intereses):
         """Update profile document and log changes to database."""
         old_profile = self.get_profile(user_id) or {}
         
@@ -53,6 +64,7 @@ class MongoRepository:
                     "biografia": biografia,
                     "caracteristicas": caracteristicas,
                     "preferencias": preferencias,
+                    "intereses": intereses,
                     "updated_at": datetime.utcnow()
                 }
             }
@@ -62,6 +74,7 @@ class MongoRepository:
         self._log_diff(user_id, "biografia", old_profile.get("biografia"), biografia)
         self._log_diff(user_id, "caracteristicas", old_profile.get("caracteristicas"), caracteristicas)
         self._log_diff(user_id, "preferencias", old_profile.get("preferencias"), preferencias)
+        self._log_diff(user_id, "intereses", old_profile.get("intereses"), intereses)
 
     def _log_diff(self, user_id, field_name, old_val, new_val):
         """Internal helper to log individual profile field change."""
