@@ -1,81 +1,82 @@
-from psycopg2 import connect
-from pymongo import MongoClient
-import redis
-from cassandra.cluster import Cluster
-from neo4j import GraphDatabase
+import sys
+from src.database.connection import (
+    get_postgres_connection,
+    get_mongodb_client,
+    get_mongodb_database,
+    get_redis_client,
+    get_cassandra_session,
+    get_neo4j_driver
+)
 
 
 def test_postgres():
-    conn = connect(
-        host="localhost",
-        port=5433,
-        dbname="tinder_app",
-        user="tpo_user",
-        password="tpo_password"
-    )
-    cur = conn.cursor()
-    cur.execute("SELECT 'PostgreSQL OK';")
-    print(cur.fetchone()[0])
-    cur.close()
-    conn.close()
+    try:
+        conn = get_postgres_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT 'PostgreSQL OK';")
+        res = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        print(res)
+    except Exception as e:
+        print(f"PostgreSQL ERROR: {e}")
+        sys.exit(1)
 
 
 def test_mongodb():
-    client = MongoClient("mongodb://tpo_user:tpo_password@localhost:27017/")
-    db = client["tinder_app"]
-    db.test.insert_one({"mensaje": "MongoDB OK"})
-    result = db.test.find_one({"mensaje": "MongoDB OK"})
-    print(result["mensaje"])
-    client.close()
+    try:
+        db = get_mongodb_database()
+        # Ping the server
+        db.command("ping")
+        print("MongoDB OK")
+    except Exception as e:
+        print(f"MongoDB ERROR: {e}")
+        sys.exit(1)
 
 
 def test_redis():
-    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
-    r.set("test", "Redis OK")
-    print(r.get("test"))
+    try:
+        r = get_redis_client()
+        r.ping()
+        print("Redis OK")
+    except Exception as e:
+        print(f"Redis ERROR: {e}")
+        sys.exit(1)
 
 
 def test_cassandra():
-    cluster = Cluster(["localhost"], port=9042)
-    session = cluster.connect()
-    session.execute("""
-        CREATE KEYSPACE IF NOT EXISTS tinder_app
-        WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
-    """)
-    session.set_keyspace("tinder_app")
-    session.execute("""
-        CREATE TABLE IF NOT EXISTS test (
-            id int PRIMARY KEY,
-            mensaje text
-        )
-    """)
-    session.execute("INSERT INTO test (id, mensaje) VALUES (1, 'Cassandra OK')")
-    row = session.execute("SELECT mensaje FROM test WHERE id = 1").one()
-    print(row.mensaje)
-    cluster.shutdown()
+    try:
+        cluster, session = get_cassandra_session()
+        # Simple query
+        session.execute("SELECT release_version FROM system.local").one()
+        cluster.shutdown()
+        print("Cassandra OK")
+    except Exception as e:
+        print(f"Cassandra ERROR: {e}")
+        sys.exit(1)
 
 
 def test_neo4j():
-    driver = GraphDatabase.driver(
-        "bolt://localhost:7687",
-        auth=("neo4j", "tpo_password")
-    )
-
-    with driver.session() as session:
-        result = session.run("""
-            MERGE (n:Test {mensaje: 'Neo4j OK'})
-            RETURN n.mensaje AS mensaje
-        """)
-        print(result.single()["mensaje"])
-
-    driver.close()
+    try:
+        driver = get_neo4j_driver()
+        with driver.session() as session:
+            session.run("RETURN 1")
+        driver.close()
+        print("Neo4j OK")
+    except Exception as e:
+        print(f"Neo4j ERROR: {e}")
+        sys.exit(1)
 
 
-if __name__ == "__main__":
+def main():
+    print("Iniciando validación de conexiones a las 5 bases de datos...")
     test_postgres()
     test_mongodb()
     test_redis()
     test_cassandra()
     test_neo4j()
+    print("\nTodas las conexiones se realizaron con éxito.")
 
-    print("Todas las conexiones funcionan correctamente.")
+
+if __name__ == "__main__":
+    main()
