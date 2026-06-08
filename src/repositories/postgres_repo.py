@@ -163,6 +163,41 @@ class PostgresRepository:
         finally:
             conn.close()
 
+    def register_block_and_delete_match(self, bloqueador_id, bloqueado_id):
+        """
+        Register a block audit and remove the official confirmed match in one
+        PostgreSQL transaction.
+        """
+        u1, u2 = min(bloqueador_id, bloqueado_id), max(bloqueador_id, bloqueado_id)
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM coincidencias_confirmadas
+                    WHERE user_id_1 = %s AND user_id_2 = %s
+                    RETURNING id;
+                    """,
+                    (u1, u2)
+                )
+                row = cur.fetchone()
+                deleted_match_id = row[0] if row else None
+
+                cur.execute(
+                    """
+                    INSERT INTO bloqueos_auditoria (bloqueador_id, bloqueado_id)
+                    VALUES (%s, %s);
+                    """,
+                    (bloqueador_id, bloqueado_id)
+                )
+            conn.commit()
+            return deleted_match_id
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
     def get_match_between_users(self, user_a, user_b):
         """Retrieve match details between user_a and user_b if it exists."""
         u1, u2 = min(user_a, user_b), max(user_a, user_b)

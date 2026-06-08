@@ -524,31 +524,42 @@ class AppService:
         Flow for Blocking a User:
         1. Redis validates session active.
         2. Neo4j creates relationship BLOQUEO and removes likes/matches.
-        3. PostgreSQL registers block audit log.
+        3. PostgreSQL registers block audit log and removes the official match, if any.
         4. MongoDB registers log event.
         """
         bloqueador_id = self.get_current_user_id(token)
         if bloqueador_id is None:
             raise PermissionError("Sesión inválida o expirada.")
 
+        if bloqueador_id == bloqueado_id:
+            raise ValueError("No puedes bloquearte a ti mismo.")
+
         # 2. Neo4j block and delete links
         self.neo4j_repo.create_block(bloqueador_id, bloqueado_id)
 
-        # 3. PostgreSQL audit
+        # 3. PostgreSQL audit and official match removal
         try:
-            self.pg_repo.create_block_audit(bloqueador_id, bloqueado_id)
+            deleted_match_id = self.pg_repo.register_block_and_delete_match(bloqueador_id, bloqueado_id)
         except Exception as e:
-            logger.error(f"PostgreSQL block audit failed: {e}. Proceeding.")
+            logger.error(f"PostgreSQL block registration failed: {e}.")
+            raise RuntimeError("No se pudo registrar el bloqueo en PostgreSQL. La operacion quedo incompleta y requiere revision.")
 
         # 4. MongoDB log event
         try:
             self.mongo_repo.db.bloqueos.insert_one({
                 "bloqueador_id": bloqueador_id,
                 "bloqueado_id": bloqueado_id,
+                "match_eliminado_id": deleted_match_id,
                 "timestamp": datetime.utcnow()
             })
         except Exception as e:
             logger.error(f"MongoDB block logging failed: {e}. Proceeding.")
+
+        return {
+            "bloqueador_id": bloqueador_id,
+            "bloqueado_id": bloqueado_id,
+            "match_eliminado_id": deleted_match_id
+        }
 
     def crear_evento(self, token, titulo, descripcion, ubicacion, fecha_hora_str):
         """
