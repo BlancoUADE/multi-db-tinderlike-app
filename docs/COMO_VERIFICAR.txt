@@ -25,7 +25,7 @@ COMO VERIFICAR EL PROYECTO MULTI-DB
 4. Cargar datos demo
 
    python main.py
-   Opcion 19: Cargar datos demo
+   Menu principal -> Sistema -> Cargar datos demo
 
 5. Verificar datos por motor
 
@@ -66,9 +66,10 @@ FLUJO DE DEFENSA RECOMENDADO
 
 1. Mostrar que el CLI confirma las cinco conexiones.
 2. Cargar datos demo.
-3. Mostrar usuarios y perfiles.
-4. Mostrar likes y matches automaticos por like reciproco.
-5. Usar Recomendar perfiles para mostrar Neo4j + MongoDB en una misma operacion.
-6. Mostrar mensajes leidos desde Cassandra.
-7. Hacer login, ver TTL en Redis y hacer logout.
-8. Ejecutar verify_databases.py para ver la distribucion por motor.
+3. Volver al menu principal y listar usuarios.
+4. Iniciar sesion con un usuario.
+5. Mostrar perfil, likes y matches desde el menu de usuario.
+6. Usar Recomendar perfiles para mostrar Neo4j + MongoDB en una misma operacion.
+7. Mostrar mensajes leidos desde Cassandra.
+8. Ver TTL en Redis y hacer logout.
+9. Ejecutar verify_databases.py para ver la distribucion por motor.

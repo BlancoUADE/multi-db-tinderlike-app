@@ -2,8 +2,9 @@
 """
 CLI Tinder Multi-DB.
 
-El usuario opera un unico programa. Internamente, el CLI coordina
-PostgreSQL, MongoDB, Redis, Cassandra y Neo4j.
+Menu principal compacto, menu de usuario con sesion activa y menu de sistema
+para configuracion/demo. El usuario no necesita saber que motor resuelve cada
+operacion.
 """
 
 import sys
@@ -45,7 +46,7 @@ def ask_bool(prompt):
         print("Responda 's' o 'n'.")
 
 
-def register_user(conn, mongo_db, neo4j_driver):
+def register_user(conn, mongo_db, neo4j_driver, redis_client):
     print("\nRegistro de usuario")
     name = ask_text("Nombre: ")
     age = ask_int("Edad: ", minimum=1)
@@ -55,110 +56,30 @@ def register_user(conn, mongo_db, neo4j_driver):
     pref_min = ask_int("Preferencia de edad minima: ", minimum=1)
     pref_max = ask_int("Preferencia de edad maxima: ", minimum=pref_min)
     user_id = db.register_user(conn, mongo_db, neo4j_driver, name, age, gender, location, bio, pref_min, pref_max)
+    token = db.create_session(conn, mongo_db, redis_client, user_id, "registro-cli")
     print(f"Usuario registrado correctamente. ID asignado: {user_id}")
-
-
-def create_interest(conn):
-    print("\nCrear interes")
-    name = ask_text("Nombre del interes: ")
-    interest_id = db.create_interest(conn, name)
-    print(f"Interes registrado. ID asignado: {interest_id}")
-
-
-def assign_interest(conn, mongo_db, neo4j_driver):
-    print("\nAsignar interes a usuario")
-    user_id = ask_int("ID de usuario: ", minimum=1)
-    interest_name = ask_text("Nombre del interes: ")
-    interest_id = db.assign_interest(conn, mongo_db, neo4j_driver, user_id, interest_name)
-    if interest_id:
-        print("Interes asignado y sincronizado con MongoDB/Neo4j.")
-
-
-def add_photo(conn, mongo_db):
-    print("\nAgregar foto")
-    user_id = ask_int("ID de usuario: ", minimum=1)
-    url = ask_text("URL de la foto: ")
-    is_main = ask_bool("Es foto principal?")
-    photo_id = db.add_photo(conn, mongo_db, user_id, url, is_main)
-    if photo_id:
-        print(f"Foto agregada y perfil MongoDB actualizado. ID: {photo_id}")
-
-
-def create_like(conn, redis_client, neo4j_driver):
-    print("\nDar like")
-    origin = ask_int("Tu ID de usuario: ", minimum=1)
-    dest = ask_int("ID del usuario destino: ", minimum=1)
-    result = db.create_like(conn, redis_client, neo4j_driver, origin, dest)
-    if not result:
-        return
-    print(f"Like registrado. ID: {result['like_id']}")
-    if result["match_id"]:
-        print(f"Like reciproco detectado. Match creado/confirmado. ID: {result['match_id']}")
-
-
-def create_match_manual(conn, redis_client, neo4j_driver):
-    print("\nForzar match")
-    user1 = ask_int("ID usuario 1: ", minimum=1)
-    user2 = ask_int("ID usuario 2: ", minimum=1)
-    match_id = db.create_match(conn, redis_client, neo4j_driver, user1, user2)
-    if match_id:
-        print(f"Coincidencia registrada/sincronizada. ID: {match_id}")
-
-
-def block_user(conn, neo4j_driver):
-    print("\nBloquear usuario")
-    blocker_id = ask_int("ID bloqueador: ", minimum=1)
-    blocked_id = ask_int("ID bloqueado: ", minimum=1)
-    block_id = db.block_user(conn, neo4j_driver, blocker_id, blocked_id)
-    if block_id:
-        print(f"Bloqueo registrado. ID: {block_id}")
-    else:
-        print("El bloqueo ya existia o no pudo registrarse.")
-
-
-def send_message(conn, redis_client, cassandra_session):
-    print("\nEnviar mensaje")
-    match_id = ask_int("ID de coincidencia: ", minimum=1)
-    sender_id = ask_int("ID emisor: ", minimum=1)
-    content = ask_text("Mensaje: ")
-    message_id = db.send_message(conn, redis_client, cassandra_session, match_id, sender_id, content)
-    if message_id:
-        print(f"Mensaje guardado en PostgreSQL y Cassandra. ID: {message_id}")
+    print(f"Sesion iniciada. Token: {token}")
+    return {"user_id": user_id, "token": token}
 
 
 def login_user(conn, mongo_db, redis_client):
-    print("\nLogin demo con TTL")
+    print("\nIniciar sesion")
     user_id = ask_int("ID de usuario: ", minimum=1)
     device_name = ask_text("Dispositivo: ")
     token = db.create_session(conn, mongo_db, redis_client, user_id, device_name)
     if not token:
         print("Login fallido. Quedo auditado en MongoDB.")
-        return
+        return None
     ttl = db.get_session_ttl(redis_client, user_id, token)
     print("Login exitoso. Quedo auditado en MongoDB y activo en Redis.")
     print(f"Token: {token}")
     print(f"TTL: {ttl} segundos")
+    return {"user_id": user_id, "token": token}
 
 
-def view_session_ttl(redis_client):
-    print("\nVer TTL de sesion")
-    user_id = ask_int("ID de usuario: ", minimum=1)
-    token = ask_text("Token: ")
-    ttl = db.get_session_ttl(redis_client, user_id, token)
-    if ttl == -2:
-        print("La sesion no existe o ya expiro.")
-    elif ttl == -1:
-        print("La sesion existe sin TTL.")
-    else:
-        print(f"TTL restante: {ttl} segundos")
-
-
-def logout_user(redis_client):
-    print("\nLogout")
-    user_id = ask_int("ID de usuario: ", minimum=1)
-    token = ask_text("Token: ")
-    deleted = db.logout_session(redis_client, user_id, token)
-    print("Sesion cerrada." if deleted else "No habia una sesion activa con ese token.")
+def logout_user(redis_client, session_state):
+    deleted = db.logout_session(redis_client, session_state["user_id"], session_state["token"])
+    print("Sesion cerrada." if deleted else "La sesion ya no estaba activa.")
 
 
 def list_current_users(conn):
@@ -171,9 +92,55 @@ def list_current_users(conn):
         print(f"- {user['id_usuario']}: {user['nombre']} ({user['edad']} anios, {user['ubicacion']})")
 
 
-def view_user_profile(conn):
-    user_id = ask_int("ID del usuario a ver: ", minimum=1)
-    db.view_user_profile(conn, user_id)
+def view_my_profile(conn, session_state):
+    db.view_user_profile(conn, session_state["user_id"])
+
+
+def add_my_photo(conn, mongo_db, session_state):
+    print("\nAgregar foto")
+    url = ask_text("URL de la foto: ")
+    is_main = ask_bool("Es foto principal?")
+    photo_id = db.add_photo(conn, mongo_db, session_state["user_id"], url, is_main)
+    if photo_id:
+        print(f"Foto agregada y perfil MongoDB actualizado. ID: {photo_id}")
+
+
+def assign_my_interest(conn, mongo_db, neo4j_driver, session_state):
+    print("\nAsignar interes a mi perfil")
+    interest_name = ask_text("Nombre del interes: ")
+    interest_id = db.assign_interest(conn, mongo_db, neo4j_driver, session_state["user_id"], interest_name)
+    if interest_id:
+        print("Interes asignado y sincronizado con MongoDB/Neo4j.")
+
+
+def create_like(conn, redis_client, neo4j_driver, session_state):
+    print("\nDar like")
+    dest = ask_int("ID del usuario destino: ", minimum=1)
+    result = db.create_like(conn, redis_client, neo4j_driver, session_state["user_id"], dest)
+    if not result:
+        return
+    print(f"Like registrado. ID: {result['like_id']}")
+    if result["match_id"]:
+        print(f"Like reciproco detectado. Match creado/confirmado. ID: {result['match_id']}")
+
+
+def block_user(conn, neo4j_driver, session_state):
+    print("\nBloquear usuario")
+    blocked_id = ask_int("ID del usuario a bloquear: ", minimum=1)
+    block_id = db.block_user(conn, neo4j_driver, session_state["user_id"], blocked_id)
+    if block_id:
+        print(f"Bloqueo registrado. ID: {block_id}")
+    else:
+        print("El bloqueo ya existia o no pudo registrarse.")
+
+
+def send_message(conn, redis_client, cassandra_session, session_state):
+    print("\nEnviar mensaje")
+    match_id = ask_int("ID de coincidencia: ", minimum=1)
+    content = ask_text("Mensaje: ")
+    message_id = db.send_message(conn, redis_client, cassandra_session, match_id, session_state["user_id"], content)
+    if message_id:
+        print(f"Mensaje guardado en PostgreSQL y Cassandra. ID: {message_id}")
 
 
 def view_likes(conn):
@@ -229,9 +196,9 @@ def view_messages(conn, cassandra_session):
         print(f"{message['emisor']}: {message['contenido']} ({message['fecha_envio']}, {message['origen']})")
 
 
-def view_notifications(conn, redis_client):
+def view_notifications(conn, redis_client, session_state):
     print("\nNotificaciones")
-    user_id = ask_int("ID de usuario: ", minimum=1)
+    user_id = session_state["user_id"]
     unread_count = db.get_unread_count(redis_client, user_id)
     print(f"Contador Redis de no leidas: {unread_count}")
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -257,11 +224,10 @@ def view_notifications(conn, redis_client):
         print("Notificaciones marcadas como leidas y contador Redis reiniciado.")
 
 
-def recommend_profiles(conn, mongo_db, neo4j_driver):
+def recommend_profiles(conn, mongo_db, neo4j_driver, session_state):
     print("\nRecomendar perfiles")
-    user_id = ask_int("ID de usuario: ", minimum=1)
     limit = ask_int("Cantidad maxima de recomendaciones: ", minimum=1)
-    recommendations = db.recommend_profiles(conn, mongo_db, neo4j_driver, user_id, limit)
+    recommendations = db.recommend_profiles(conn, mongo_db, neo4j_driver, session_state["user_id"], limit)
     if not recommendations:
         print("No hay recomendaciones disponibles para ese usuario.")
         return
@@ -280,6 +246,32 @@ def recommend_profiles(conn, mongo_db, neo4j_driver):
             print(f"Foto principal: {main_photo['url_archivo']}")
 
 
+def view_session_ttl(redis_client, session_state):
+    ttl = db.get_session_ttl(redis_client, session_state["user_id"], session_state["token"])
+    if ttl == -2:
+        print("La sesion no existe o ya expiro.")
+    elif ttl == -1:
+        print("La sesion existe sin TTL.")
+    else:
+        print(f"TTL restante: {ttl} segundos")
+
+
+def create_interest(conn):
+    print("\nCrear interes global")
+    name = ask_text("Nombre del interes: ")
+    interest_id = db.create_interest(conn, name)
+    print(f"Interes registrado. ID asignado: {interest_id}")
+
+
+def create_match_manual(conn, redis_client, neo4j_driver):
+    print("\nForzar match")
+    user1 = ask_int("ID usuario 1: ", minimum=1)
+    user2 = ask_int("ID usuario 2: ", minimum=1)
+    match_id = db.create_match(conn, redis_client, neo4j_driver, user1, user2)
+    if match_id:
+        print(f"Coincidencia registrada/sincronizada. ID: {match_id}")
+
+
 def seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver):
     print("\nCargando datos demo. Esto limpia las bases antes de cargar.")
     db.seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
@@ -289,6 +281,99 @@ def seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver
 def reset_all_databases(conn, mongo_db, redis_client, cassandra_session, neo4j_driver):
     db.reset_database(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
     print("Todas las bases quedaron limpias.")
+
+
+def show_user_menu(resources, session_state):
+    conn = resources["conn"]
+    mongo_db = resources["mongo_db"]
+    redis_client = resources["redis_client"]
+    cassandra_session = resources["cassandra_session"]
+    neo4j_driver = resources["neo4j_driver"]
+    user = db.fetch_user(conn, session_state["user_id"])
+    title_name = user["nombre"] if user else f"Usuario {session_state['user_id']}"
+
+    while True:
+        print(f"\n=== Menu Usuario: {title_name} ===")
+        print("1. Ver mi perfil")
+        print("2. Agregar foto")
+        print("3. Agregar interes a mi perfil")
+        print("4. Dar like")
+        print("5. Recomendar perfiles")
+        print("6. Enviar mensaje")
+        print("7. Ver mensajes de un match")
+        print("8. Ver notificaciones")
+        print("9. Ver likes")
+        print("10. Ver matches")
+        print("11. Bloquear usuario")
+        print("12. Ver TTL de mi sesion")
+        print("13. Cerrar sesion")
+        print("14. Volver al menu principal")
+
+        option = input("Seleccione una opcion: ").strip()
+
+        if option == "1":
+            view_my_profile(conn, session_state)
+        elif option == "2":
+            add_my_photo(conn, mongo_db, session_state)
+        elif option == "3":
+            assign_my_interest(conn, mongo_db, neo4j_driver, session_state)
+        elif option == "4":
+            create_like(conn, redis_client, neo4j_driver, session_state)
+        elif option == "5":
+            recommend_profiles(conn, mongo_db, neo4j_driver, session_state)
+        elif option == "6":
+            send_message(conn, redis_client, cassandra_session, session_state)
+        elif option == "7":
+            view_messages(conn, cassandra_session)
+        elif option == "8":
+            view_notifications(conn, redis_client, session_state)
+        elif option == "9":
+            view_likes(conn)
+        elif option == "10":
+            view_matches(conn)
+        elif option == "11":
+            block_user(conn, neo4j_driver, session_state)
+        elif option == "12":
+            view_session_ttl(redis_client, session_state)
+        elif option == "13":
+            logout_user(redis_client, session_state)
+            return None
+        elif option == "14":
+            return session_state
+        else:
+            print("Opcion invalida.")
+
+
+def show_system_menu(resources):
+    conn = resources["conn"]
+    mongo_db = resources["mongo_db"]
+    redis_client = resources["redis_client"]
+    cassandra_session = resources["cassandra_session"]
+    neo4j_driver = resources["neo4j_driver"]
+
+    while True:
+        print("\n=== Sistema ===")
+        print("1. Crear interes global")
+        print("2. Forzar match")
+        print("3. Cargar datos demo")
+        print("4. Limpiar todas las bases")
+        print("5. Volver")
+
+        option = input("Seleccione una opcion: ").strip()
+
+        if option == "1":
+            create_interest(conn)
+        elif option == "2":
+            create_match_manual(conn, redis_client, neo4j_driver)
+        elif option == "3":
+            seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
+        elif option == "4":
+            if ask_bool("Seguro que queres limpiar todas las bases?"):
+                reset_all_databases(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
+        elif option == "5":
+            return
+        else:
+            print("Opcion invalida.")
 
 
 def check_environment():
@@ -343,6 +428,7 @@ def main():
     redis_client = resources["redis_client"]
     cassandra_session = resources["cassandra_session"]
     neo4j_driver = resources["neo4j_driver"]
+    session_state = None
 
     try:
         db.ensure_postgres_schema(conn)
@@ -352,70 +438,28 @@ def main():
         while True:
             print("\n=== CLI Tinder Multi-DB ===")
             print("1. Registrar usuario")
-            print("2. Crear interes")
-            print("3. Asignar interes a usuario")
-            print("4. Agregar foto")
-            print("5. Dar like (crea match automatico si es reciproco)")
-            print("6. Forzar match")
-            print("7. Bloquear usuario")
-            print("8. Enviar mensaje")
-            print("9. Login con sesion Redis TTL")
-            print("10. Ver TTL de sesion")
-            print("11. Logout")
-            print("12. Listar usuarios")
-            print("13. Ver perfil de usuario")
-            print("14. Ver likes")
-            print("15. Ver matches")
-            print("16. Ver mensajes")
-            print("17. Ver notificaciones")
-            print("18. Recomendar perfiles")
-            print("19. Cargar datos demo")
-            print("20. Limpiar todas las bases")
-            print("21. Salir")
+            print("2. Iniciar sesion")
+            print("3. Listar usuarios")
+            print("4. Sistema")
+            print("5. Salir")
 
             option = input("Seleccione una opcion: ").strip()
 
             if option == "1":
-                register_user(conn, mongo_db, neo4j_driver)
+                session_state = register_user(conn, mongo_db, neo4j_driver, redis_client)
+                if session_state:
+                    session_state = show_user_menu(resources, session_state)
             elif option == "2":
-                create_interest(conn)
+                session_state = login_user(conn, mongo_db, redis_client)
+                if session_state:
+                    session_state = show_user_menu(resources, session_state)
             elif option == "3":
-                assign_interest(conn, mongo_db, neo4j_driver)
-            elif option == "4":
-                add_photo(conn, mongo_db)
-            elif option == "5":
-                create_like(conn, redis_client, neo4j_driver)
-            elif option == "6":
-                create_match_manual(conn, redis_client, neo4j_driver)
-            elif option == "7":
-                block_user(conn, neo4j_driver)
-            elif option == "8":
-                send_message(conn, redis_client, cassandra_session)
-            elif option == "9":
-                login_user(conn, mongo_db, redis_client)
-            elif option == "10":
-                view_session_ttl(redis_client)
-            elif option == "11":
-                logout_user(redis_client)
-            elif option == "12":
                 list_current_users(conn)
-            elif option == "13":
-                view_user_profile(conn)
-            elif option == "14":
-                view_likes(conn)
-            elif option == "15":
-                view_matches(conn)
-            elif option == "16":
-                view_messages(conn, cassandra_session)
-            elif option == "17":
-                view_notifications(conn, redis_client)
-            elif option == "18":
-                recommend_profiles(conn, mongo_db, neo4j_driver)
-            elif option == "19":
-                seed_demo_data(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
-            elif option == "20":
-                reset_all_databases(conn, mongo_db, redis_client, cassandra_session, neo4j_driver)
-            elif option == "21":
+            elif option == "4":
+                show_system_menu(resources)
+            elif option == "5":
+                if session_state and ask_bool("Hay una sesion activa. Cerrar antes de salir?"):
+                    logout_user(redis_client, session_state)
                 print("Hasta luego.")
                 break
             else:

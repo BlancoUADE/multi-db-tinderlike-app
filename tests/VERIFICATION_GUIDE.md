@@ -40,7 +40,7 @@ Neo4j:
 
 - nodos `Usuario`, `Interes`, `Evento`
 - relaciones `TIENE_INTERES`, `DIO_LIKE`, `MATCH`, `BLOQUEO`, `ASISTE`
-- la opcion `18. Recomendar perfiles` combina candidatos de Neo4j con tarjetas de MongoDB
+- `Menu de usuario -> Recomendar perfiles` combina candidatos de Neo4j con tarjetas de MongoDB
 
 ## Consultas utiles
 

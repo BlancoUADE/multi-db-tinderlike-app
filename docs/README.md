@@ -16,27 +16,40 @@ python main.py
 
 ## Menu actual del CLI
 
+### Menu principal
+
 1. Registrar usuario
-2. Crear interes
-3. Asignar interes a usuario
-4. Agregar foto
-5. Dar like, creando match automatico si el like es reciproco
-6. Forzar match
-7. Bloquear usuario
-8. Enviar mensaje
-9. Login con sesion Redis TTL
-10. Ver TTL de sesion
-11. Logout
-12. Listar usuarios
-13. Ver perfil de usuario
-14. Ver likes
-15. Ver matches
-16. Ver mensajes
-17. Ver notificaciones
-18. Recomendar perfiles
-19. Cargar datos demo
-20. Limpiar todas las bases
-21. Salir
+2. Iniciar sesion
+3. Listar usuarios
+4. Sistema
+5. Salir
+
+### Menu de usuario
+
+Se abre despues de registrar usuario o iniciar sesion.
+
+1. Ver mi perfil
+2. Agregar foto
+3. Agregar interes a mi perfil
+4. Dar like
+5. Recomendar perfiles
+6. Enviar mensaje
+7. Ver mensajes de un match
+8. Ver notificaciones
+9. Ver likes
+10. Ver matches
+11. Bloquear usuario
+12. Ver TTL de mi sesion
+13. Cerrar sesion
+14. Volver al menu principal
+
+### Sistema
+
+1. Crear interes global
+2. Forzar match
+3. Cargar datos demo
+4. Limpiar todas las bases
+5. Volver
 
 ## Scripts de verificacion
 
