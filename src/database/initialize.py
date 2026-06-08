@@ -45,7 +45,7 @@ def init_mongodb():
 
 def init_cassandra():
     print("Inicializando Cassandra...")
-    cluster, session = get_cassandra_session()
+    session = get_cassandra_session()
     try:
         # Create swipes_por_dia
         session.execute("""
@@ -105,9 +105,6 @@ def init_cassandra():
     except Exception as e:
         print(f"Error al inicializar Cassandra: {e}")
         raise e
-    finally:
-        cluster.shutdown()
-
 def init_neo4j():
     print("Inicializando Neo4j...")
     driver = get_neo4j_driver()

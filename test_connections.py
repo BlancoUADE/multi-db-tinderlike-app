@@ -46,10 +46,9 @@ def test_redis():
 
 def test_cassandra():
     try:
-        cluster, session = get_cassandra_session()
+        session = get_cassandra_session()
         # Simple query
         session.execute("SELECT release_version FROM system.local").one()
-        cluster.shutdown()
         print("Cassandra OK")
     except Exception as e:
         print(f"Cassandra ERROR: {e}")

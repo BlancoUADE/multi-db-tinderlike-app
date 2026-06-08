@@ -28,26 +28,31 @@ class ReportService:
         pass
 
     # REPORT 1: Promedio de coincidencias por día
-    def get_avg_matches_per_day(self):
+    def get_avg_matches_per_day(self, fecha_desde=None, fecha_hasta=None):
         """
         Cassandra: matches_por_dia
-        Query: SELECT fecha FROM matches_por_dia;
+        Query: SELECT fecha FROM matches_por_dia WHERE fecha IN ?;
         """
-        cluster, session = get_cassandra_session()
-        try:
-            rows = session.execute("SELECT fecha FROM matches_por_dia;")
-            matches_by_day = {}
-            for row in rows:
-                fecha_str = str(row.fecha)
-                matches_by_day[fecha_str] = matches_by_day.get(fecha_str, 0) + 1
+        if fecha_hasta is None:
+            fecha_hasta = datetime.date.today()
+        if fecha_desde is None:
+            fecha_desde = fecha_hasta - datetime.timedelta(days=90)
             
-            if not matches_by_day:
-                return 0.0, {}
-            
-            avg = sum(matches_by_day.values()) / len(matches_by_day)
-            return avg, matches_by_day
-        finally:
-            cluster.shutdown()
+        fechas = [fecha_desde + datetime.timedelta(days=i) for i in range((fecha_hasta - fecha_desde).days + 1)]
+        
+        session = get_cassandra_session()
+        stmt = session.prepare("SELECT fecha FROM matches_por_dia WHERE fecha IN ?;")
+        rows = session.execute(stmt, [fechas])
+        matches_by_day = {}
+        for row in rows:
+            fecha_str = str(row.fecha)
+            matches_by_day[fecha_str] = matches_by_day.get(fecha_str, 0) + 1
+        
+        if not matches_by_day:
+            return 0.0, {}
+        
+        avg = sum(matches_by_day.values()) / len(matches_by_day)
+        return avg, matches_by_day
 
     # REPORT 2: Características más populares de los perfiles
     def get_popular_characteristics(self):
@@ -77,20 +82,28 @@ class ReportService:
         return formatted
 
     # REPORT 3: Perfiles que reciben más swipes a la derecha (Likes)
-    def get_most_liked_profiles(self):
+    def get_most_liked_profiles(self, user_ids=None):
         """
         Cassandra: swipes_recibidos_por_perfil
-        Query: SELECT user_to, tipo FROM swipes_recibidos_por_perfil;
+        Query: SELECT tipo FROM swipes_recibidos_por_perfil WHERE user_to = ? AND tipo = 'like';
         """
-        cluster, session = get_cassandra_session()
+        if not user_ids:
+            conn = get_postgres_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM users;")
+                    user_ids = [row[0] for row in cur.fetchall()]
+            finally:
+                conn.close()
+
+        session = get_cassandra_session()
         likes_count = {}
-        try:
-            rows = session.execute("SELECT user_to, tipo FROM swipes_recibidos_por_perfil;")
-            for row in rows:
-                if row.tipo == "like":
-                    likes_count[row.user_to] = likes_count.get(row.user_to, 0) + 1
-        finally:
-            cluster.shutdown()
+        stmt = session.prepare("SELECT tipo FROM swipes_recibidos_por_perfil WHERE user_to = ? AND tipo = 'like';")
+        for u_id in user_ids:
+            rows = session.execute(stmt, [u_id])
+            count = sum(1 for _ in rows)
+            if count > 0:
+                likes_count[u_id] = count
 
         # Sort in Python (academic requirement)
         sorted_likes = sorted(likes_count.items(), key=lambda x: x[1], reverse=True)
@@ -137,33 +150,30 @@ class ReportService:
         if not citas:
             return 0.0, []
 
-        cluster, session = get_cassandra_session()
+        session = get_cassandra_session()
         durations = []
         details = []
-        try:
-            for match_id, u1, u2, fecha_evento, titulo_evento in citas:
-                # Query first message in Cassandra
-                stmt = session.prepare("SELECT timestamp FROM mensajes_por_conversacion WHERE match_id = ? LIMIT 1;")
-                row = session.execute(stmt, [match_id]).one()
-                if row:
-                    first_msg_time = row.timestamp
-                    # Convert both to offset-naive datetimes for safe comparison
-                    fe_naive = fecha_evento.replace(tzinfo=None) if fecha_evento.tzinfo else fecha_evento
-                    fmt_naive = first_msg_time.replace(tzinfo=None) if first_msg_time.tzinfo else first_msg_time
-                    if fe_naive > fmt_naive:
-                        diff = (fe_naive - fmt_naive).total_seconds() / 3600.0  # hours
-                        durations.append(diff)
-                        details.append({
-                            "match_id": match_id,
-                            "user_1": u1,
-                            "user_2": u2,
-                            "evento": titulo_evento,
-                            "primera_conve": first_msg_time,
-                            "fecha_cita": fecha_evento,
-                            "diferencia_horas": round(diff, 1)
-                        })
-        finally:
-            cluster.shutdown()
+        for match_id, u1, u2, fecha_evento, titulo_evento in citas:
+            # Query first message in Cassandra
+            stmt = session.prepare("SELECT timestamp FROM mensajes_por_conversacion WHERE match_id = ? LIMIT 1;")
+            row = session.execute(stmt, [match_id]).one()
+            if row:
+                first_msg_time = row.timestamp
+                # Convert both to offset-naive datetimes for safe comparison
+                fe_naive = fecha_evento.replace(tzinfo=None) if fecha_evento.tzinfo else fecha_evento
+                fmt_naive = first_msg_time.replace(tzinfo=None) if first_msg_time.tzinfo else first_msg_time
+                if fe_naive > fmt_naive:
+                    diff = (fe_naive - fmt_naive).total_seconds() / 3600.0  # hours
+                    durations.append(diff)
+                    details.append({
+                        "match_id": match_id,
+                        "user_1": u1,
+                        "user_2": u2,
+                        "evento": titulo_evento,
+                        "primera_conve": first_msg_time,
+                        "fecha_cita": fecha_evento,
+                        "diferencia_horas": round(diff, 1)
+                    })
 
         avg = sum(durations) / len(durations) if durations else 0.0
         return avg, details
@@ -241,24 +251,33 @@ class ReportService:
         return results
 
     # REPORT 7: Coincidencias ocurridas durante fines de semana o feriados
-    def get_holiday_matches(self):
+    def get_holiday_matches(self, fecha_desde=None, fecha_hasta=None):
         """
         Cassandra: matches_por_dia
         Python: filter Saturdays (5), Sundays (6) and hardcoded holidays
         """
-        cluster, session = get_cassandra_session()
+        if fecha_hasta is None:
+            fecha_hasta = datetime.date.today()
+        if fecha_desde is None:
+            fecha_desde = fecha_hasta - datetime.timedelta(days=90)
+            
+        fechas = [fecha_desde + datetime.timedelta(days=i) for i in range((fecha_hasta - fecha_desde).days + 1)]
+        fechas_filtradas = [f for f in fechas if f.weekday() in (5, 6) or f in FERIADOS_ARG]
+
+        if not fechas_filtradas:
+            return []
+
+        session = get_cassandra_session()
         raw_matches = []
-        try:
-            rows = session.execute("SELECT fecha, match_id, user_1, user_2 FROM matches_por_dia;")
-            for row in rows:
-                raw_matches.append({
-                    "fecha": row.fecha,
-                    "match_id": row.match_id,
-                    "user_1": row.user_1,
-                    "user_2": row.user_2
-                })
-        finally:
-            cluster.shutdown()
+        stmt = session.prepare("SELECT fecha, match_id, user_1, user_2 FROM matches_por_dia WHERE fecha IN ?;")
+        rows = session.execute(stmt, [fechas_filtradas])
+        for row in rows:
+            raw_matches.append({
+                "fecha": row.fecha,
+                "match_id": row.match_id,
+                "user_1": row.user_1,
+                "user_2": row.user_2
+            })
 
         filtered = []
         conn = get_postgres_connection()
@@ -345,17 +364,15 @@ class ReportService:
             neo4j_driver.close()
 
         # Clean Cassandra (Truncate keyspace tables for demo simplicity)
-        cluster, cassandra_session = get_cassandra_session()
+        session = get_cassandra_session()
         try:
-            cassandra_session.execute("TRUNCATE swipes_por_dia;")
-            cassandra_session.execute("TRUNCATE swipes_recibidos_por_perfil;")
-            cassandra_session.execute("TRUNCATE matches_por_dia;")
-            cassandra_session.execute("TRUNCATE mensajes_por_conversacion;")
-            cassandra_session.execute("TRUNCATE actividad_usuario_por_fecha;")
+            session.execute("TRUNCATE swipes_por_dia;")
+            session.execute("TRUNCATE swipes_recibidos_por_perfil;")
+            session.execute("TRUNCATE matches_por_dia;")
+            session.execute("TRUNCATE mensajes_por_conversacion;")
+            session.execute("TRUNCATE actividad_usuario_por_fecha;")
         except Exception as e:
             logger.warning(f"Error truncating Cassandra tables: {e}")
-        finally:
-            cluster.shutdown()
 
         # 2. Insert new mock users into PostgreSQL
         logger.info("Creando nuevos usuarios semilla...")
@@ -517,55 +534,51 @@ class ReportService:
 
         # 6. Seed Cassandra logs
         logger.info("Registrando eventos históricos de swipes y matches en Cassandra...")
-        cluster, cassandra_session = get_cassandra_session()
-        try:
-            # Seed matches in Cassandra
-            insert_match_c = cassandra_session.prepare("""
-                INSERT INTO matches_por_dia (fecha, match_id, user_1, user_2, timestamp)
-                VALUES (?, ?, ?, ?, ?);
-            """)
-            for m_id, id_a, id_b, m_date, m_ts in created_matches:
-                cassandra_session.execute(insert_match_c, [m_date, m_id, id_a, id_b, m_ts])
+        cassandra_session = get_cassandra_session()
+        # Seed matches in Cassandra
+        insert_match_c = cassandra_session.prepare("""
+            INSERT INTO matches_por_dia (fecha, match_id, user_1, user_2, timestamp)
+            VALUES (?, ?, ?, ?, ?);
+        """)
+        for m_id, id_a, id_b, m_date, m_ts in created_matches:
+            cassandra_session.execute(insert_match_c, [m_date, m_id, id_a, id_b, m_ts])
 
-            # Seed Swipes in Cassandra (Sofia received 3 likes, Carlos received 2)
-            # Sofia (User 2) received:
-            # - Carlos (1)
-            # - Mateo (3)
-            # - Diego (6)
-            # Carlos (User 1) received:
-            # - Sofia (2)
-            # - Valentina (4)
-            swipes = [
-                (user_ids["Carlos"], user_ids["Sofia"], "like"),
-                (user_ids["Mateo"], user_ids["Sofia"], "like"),
-                (user_ids["Diego"], user_ids["Sofia"], "like"),
-                (user_ids["Sofia"], user_ids["Carlos"], "like"),
-                (user_ids["Valentina"], user_ids["Carlos"], "like"),
-                (user_ids["Nicolas"], user_ids["Lucia"], "dislike")
-            ]
+        # Seed Swipes in Cassandra (Sofia received 3 likes, Carlos received 2)
+        # Sofia (User 2) received:
+        # - Carlos (1)
+        # - Mateo (3)
+        # - Diego (6)
+        # Carlos (User 1) received:
+        # - Sofia (2)
+        # - Valentina (4)
+        swipes = [
+            (user_ids["Carlos"], user_ids["Sofia"], "like"),
+            (user_ids["Mateo"], user_ids["Sofia"], "like"),
+            (user_ids["Diego"], user_ids["Sofia"], "like"),
+            (user_ids["Sofia"], user_ids["Carlos"], "like"),
+            (user_ids["Valentina"], user_ids["Carlos"], "like"),
+            (user_ids["Nicolas"], user_ids["Lucia"], "dislike")
+        ]
 
-            insert_swipe_c = cassandra_session.prepare("""
-                INSERT INTO swipes_recibidos_por_perfil (user_to, tipo, swipe_id, user_from, fecha)
-                VALUES (?, ?, ?, ?, ?);
-            """)
-            for u_from, u_to, s_type in swipes:
-                cassandra_session.execute(insert_swipe_c, [u_to, s_type, uuid.uuid4(), u_from, datetime.datetime.utcnow()])
+        insert_swipe_c = cassandra_session.prepare("""
+            INSERT INTO swipes_recibidos_por_perfil (user_to, tipo, swipe_id, user_from, fecha)
+            VALUES (?, ?, ?, ?, ?);
+        """)
+        for u_from, u_to, s_type in swipes:
+            cassandra_session.execute(insert_swipe_c, [u_to, s_type, uuid.uuid4(), u_from, datetime.datetime.utcnow()])
 
-            # Seed Messages in Cassandra (First messages for Report 4)
-            insert_msg_c = cassandra_session.prepare("""
-                INSERT INTO mensajes_por_conversacion (match_id, timestamp, message_id, sender_id, texto)
-                VALUES (?, ?, ?, ?, ?);
-            """)
-            
-            for m_id, id_a, id_b, _, m_ts in created_matches:
-                # Add first message exactly at the match timestamp
-                cassandra_session.execute(insert_msg_c, [m_id, m_ts, uuid.uuid4(), id_a, "¡Hola! ¿Cómo estás?"])
-                # Add a reply 5 minutes later
-                reply_ts = m_ts + datetime.timedelta(minutes=5)
-                cassandra_session.execute(insert_msg_c, [m_id, reply_ts, uuid.uuid4(), id_b, "¡Hola! Todo bien por suerte, ¿vos?"])
-
-        finally:
-            cluster.shutdown()
+        # Seed Messages in Cassandra (First messages for Report 4)
+        insert_msg_c = cassandra_session.prepare("""
+            INSERT INTO mensajes_por_conversacion (match_id, timestamp, message_id, sender_id, texto)
+            VALUES (?, ?, ?, ?, ?);
+        """)
+        
+        for m_id, id_a, id_b, _, m_ts in created_matches:
+            # Add first message exactly at the match timestamp
+            cassandra_session.execute(insert_msg_c, [m_id, m_ts, uuid.uuid4(), id_a, "¡Hola! ¿Cómo estás?"])
+            # Add a reply 5 minutes later
+            reply_ts = m_ts + datetime.timedelta(minutes=5)
+            cassandra_session.execute(insert_msg_c, [m_id, reply_ts, uuid.uuid4(), id_b, "¡Hola! Todo bien por suerte, ¿vos?"])
 
         # 7. Create Events and Attendances in PostgreSQL & Neo4j
         logger.info("Creando eventos sociales y registros de asistencia...")

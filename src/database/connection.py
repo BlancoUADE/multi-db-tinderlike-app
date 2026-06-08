@@ -64,6 +64,9 @@ def get_redis_client():
     )
 
 
+_cassandra_cluster = None
+_cassandra_session = None
+
 def get_cassandra_cluster():
     """Establish and return a Cassandra Cluster object."""
     import logging
@@ -80,18 +83,27 @@ def get_cassandra_cluster():
         load_balancing_policy=DCAwareRoundRobinPolicy(local_dc='datacenter1')
     )
 
-
 def get_cassandra_session():
-    """Establish a Cassandra Cluster, connect, set keyspace, and return (cluster, session)."""
-    cluster = get_cassandra_cluster()
-    session = cluster.connect()
-    # We create the keyspace if not exists for convenience
-    session.execute(f"""
-        CREATE KEYSPACE IF NOT EXISTS {CASSANDRA_KEYSPACE}
-        WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}
-    """)
-    session.set_keyspace(CASSANDRA_KEYSPACE)
-    return cluster, session
+    """Establish a Cassandra Cluster, connect, set keyspace, and return session as a singleton."""
+    global _cassandra_cluster, _cassandra_session
+    if _cassandra_session is None or _cassandra_session.is_shutdown:
+        _cassandra_cluster = get_cassandra_cluster()
+        _cassandra_session = _cassandra_cluster.connect()
+        # We create the keyspace if not exists for convenience
+        _cassandra_session.execute(f"""
+            CREATE KEYSPACE IF NOT EXISTS {CASSANDRA_KEYSPACE}
+            WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}
+        """)
+        _cassandra_session.set_keyspace(CASSANDRA_KEYSPACE)
+    return _cassandra_session
+
+def close_cassandra_session():
+    """Close the Cassandra cluster and session cleanly."""
+    global _cassandra_cluster, _cassandra_session
+    if _cassandra_cluster:
+        _cassandra_cluster.shutdown()
+        _cassandra_cluster = None
+        _cassandra_session = None
 
 
 def get_neo4j_driver():
