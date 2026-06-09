@@ -17,24 +17,24 @@ class RedisRepository:
         self.r.delete(f"session:{token}")
 
     # --- CONTADOR DE NOTIFICACIONES ---
-    def incrementar_notificaciones_no_leidas(self, id_usuario):
-        self.r.incr(f"notificaciones_no_leidas:{id_usuario}")
+    def incrementar_notificaciones_cantidad(self, id_usuario):
+        self.r.incr(f"notificaciones_cantidad:{id_usuario}")
 
-    def resetear_notificaciones_no_leidas(self, id_usuario):
-        self.r.set(f"notificaciones_no_leidas:{id_usuario}", 0)
+    def resetear_notificaciones_cantidad(self, id_usuario):
+        self.r.set(f"notificaciones_cantidad:{id_usuario}", 0)
 
-    def obtener_notificaciones_no_leidas_count(self, id_usuario):
-        val = self.r.get(f"notificaciones_no_leidas:{id_usuario}")
+    def obtener_notificaciones_cantidad_count(self, id_usuario):
+        val = self.r.get(f"notificaciones_cantidad:{id_usuario}")
         return int(val) if val else 0
 
-    # --- LISTA DE ÚLTIMAS NOTIFICACIONES PENDIENTES ---
-    def agregar_notificacion_pendiente(self, id_usuario, notificacion_data):
-        key = f"notificaciones_pendientes:{id_usuario}"
+    # --- LISTA DE ÚLTIMAS NOTIFICACIONES POR TIPO ---
+    def agregar_notificacion_tipo(self, id_usuario, notificacion_data):
+        key = f"notificaciones_tipos:{id_usuario}"
         self.r.lpush(key, json.dumps(notificacion_data))
         self.r.ltrim(key, 0, 9)  # Guardar solo las últimas 10
 
-    def obtener_notificaciones_pendientes(self, id_usuario):
-        key = f"notificaciones_pendientes:{id_usuario}"
+    def obtener_notificaciones_tipos(self, id_usuario):
+        key = f"notificaciones_tipos:{id_usuario}"
         items = self.r.lrange(key, 0, -1)
         return [json.loads(item) for item in items]
 

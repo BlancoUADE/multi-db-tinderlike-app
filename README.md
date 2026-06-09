@@ -83,10 +83,10 @@ Los siete reportes de negocio requeridos se resuelven en las siguientes bases de
     *   *Estrategia*: Lee la tabla `estadisticas_coincidencias_por_dia` y promedia la cantidad de coincidencias diarias en Python.
 2.  **Atributos más populares en perfiles** (MongoDB):
     *   *Estrategia*: Pipeline de agregación (`aggregate` con `$group`, `$unwind` y `$avg`) sobre la colección denormalizada `perfiles_publicos` para géneros, ubicaciones, edades, intereses comunes y cantidad de fotos.
-3.  **Perfiles con más swipes a la derecha** (Redis / Cassandra):
-    *   *Estrategia*: Ranking diario consultado en el Sorted Set de Redis (`top_swipes_dia`) y ranking histórico agregando los registros de la tabla Cassandra (`swipes_perfil_total`).
-4.  **Duración promedio antes de una cita** (Cassandra):
-    *   *Estrategia*: Agrega el promedio de horas de duración de la conversación (1er mensaje de match o coincidencia hasta que se aceptó la cita) registrado en `duracion_conversacion_a_evento`.
+3.  **Perfiles con más swipes a la derecha** (Redis):
+    *   *Estrategia*: Ranking diario consultado en el Sorted Set de Redis (`top_swipes_dia`).
+4.  **Cantidad promedio de mensajes antes de una cita** (Cassandra):
+    *   *Estrategia*: Agrega la cantidad de mensajes antes de proponer la cita registradas en la tabla `mensajes_por_evento` y calcula su promedio general.
 5.  **Intereses más comunes entre usuarios que coinciden** (Neo4j):
     *   *Estrategia*: Consulta en Cypher buscando parejas en relación `(:Usuario)-[:COINCIDIO_CON]-(:Usuario)` y contando las intersecciones en `[:TIENE_INTERES]`.
 6.  **Perfiles con más de 10 fotos y al menos 3 intereses en común** (MongoDB + Neo4j):

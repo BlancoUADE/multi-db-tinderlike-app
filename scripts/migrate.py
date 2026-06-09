@@ -208,8 +208,8 @@ def migrate_cassandra():
     # Drop Spanish tables if they exist for clean rebuild
     session.execute("DROP TABLE IF EXISTS estadisticas_coincidencias_por_dia;")
     session.execute("DROP TABLE IF EXISTS swipes_perfil_por_dia;")
-    session.execute("DROP TABLE IF EXISTS swipes_perfil_total;")
     session.execute("DROP TABLE IF EXISTS duracion_conversacion_a_evento;")
+    session.execute("DROP TABLE IF EXISTS mensajes_por_evento;")
     
     # 1. estadisticas_coincidencias_por_dia
     session.execute("""
@@ -221,30 +221,14 @@ def migrate_cassandra():
         )
     """)
     
-    # 2. swipes_perfil_por_dia
+    # 3. mensajes_por_evento
     session.execute("""
-        CREATE TABLE IF NOT EXISTS swipes_perfil_por_dia (
-            fecha date,
-            id_usuario_destino int,
-            cantidad_likes int,
-            PRIMARY KEY (fecha, id_usuario_destino)
-        )
-    """)
-    
-    # 3. swipes_perfil_total
-    session.execute("""
-        CREATE TABLE IF NOT EXISTS swipes_perfil_total (
-            id_usuario_destino int PRIMARY KEY,
-            cantidad_likes_total int
-        )
-    """)
-    
-    # 4. duracion_conversacion_a_evento
-    session.execute("""
-        CREATE TABLE IF NOT EXISTS duracion_conversacion_a_evento (
-            id_evento int PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS mensajes_por_evento (
+            fecha_evento date,
+            id_evento int,
             id_coincidencia int,
-            cantidad_mensajes int
+            cantidad_mensajes int,
+            PRIMARY KEY (fecha_evento, id_evento)
         )
     """)
     

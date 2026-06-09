@@ -35,45 +35,19 @@ class CassandraRepository:
         query = "SELECT fecha, cantidad_coincidencias, cantidad_fin_de_semana, cantidad_feriado FROM estadisticas_coincidencias_por_dia"
         return list(self.session.execute(query))
 
-    # --- SWIPES PERFIL POR DIA ---
-    def registrar_like_stats(self, fecha_date, id_usuario_destino):
-        # 1. Update daily swipes
-        query_select_day = "SELECT cantidad_likes FROM swipes_perfil_por_dia WHERE fecha = %s AND id_usuario_destino = %s"
-        row_day = self.session.execute(query_select_day, [fecha_date, id_usuario_destino]).one()
-        cant_likes_day = 1 + (row_day.cantidad_likes if row_day else 0)
-        
-        query_insert_day = """
-            INSERT INTO swipes_perfil_por_dia (fecha, id_usuario_destino, cantidad_likes)
-            VALUES (%s, %s, %s)
-        """
-        self.session.execute(query_insert_day, [fecha_date, id_usuario_destino, cant_likes_day])
+    def obtener_match_stats_por_fecha(self, fecha_date):
+        query = "SELECT fecha, cantidad_coincidencias, cantidad_fin_de_semana, cantidad_feriado FROM estadisticas_coincidencias_por_dia WHERE fecha = %s"
+        return self.session.execute(query, [fecha_date]).one()
 
-        # 2. Update total swipes
-        query_select_tot = "SELECT cantidad_likes_total FROM swipes_perfil_total WHERE id_usuario_destino = %s"
-        row_tot = self.session.execute(query_select_tot, [id_usuario_destino]).one()
-        cant_likes_tot = 1 + (row_tot.cantidad_likes_total if row_tot else 0)
-        
-        query_insert_tot = """
-            INSERT INTO swipes_perfil_total (id_usuario_destino, cantidad_likes_total)
-            VALUES (%s, %s)
-        """
-        self.session.execute(query_insert_tot, [id_usuario_destino, cant_likes_tot])
-
-    def obtener_top_swipes_historico(self, limit=10):
-        # We pull all items and sort in Python because Cassandra does not support global sorting easily without clustering keys.
-        query = "SELECT id_usuario_destino, cantidad_likes_total FROM swipes_perfil_total"
-        rows = list(self.session.execute(query))
-        rows.sort(key=lambda x: x.cantidad_likes_total, reverse=True)
-        return [(r.id_usuario_destino, r.cantidad_likes_total) for r in rows[:limit]]
-
-    # --- DURACIÓN CONVERSACIÓN A EVENTO ---
-    def registrar_mensajes_antes_de_evento(self, id_evento, id_coincidencia, cantidad_mensajes):
+    
+    # --- MENSAJES POR EVENTO ---
+    def registrar_mensajes_antes_de_evento(self, fecha_evento, id_evento, id_coincidencia, cantidad_mensajes):
         query = """
-            INSERT INTO duracion_conversacion_a_evento (id_evento, id_coincidencia, cantidad_mensajes)
-            VALUES (%s, %s, %s)
+            INSERT INTO mensajes_por_evento (fecha_evento, id_evento, id_coincidencia, cantidad_mensajes)
+            VALUES (%s, %s, %s, %s)
         """
-        self.session.execute(query, [id_evento, id_coincidencia, cantidad_mensajes])
+        self.session.execute(query, [fecha_evento, id_evento, id_coincidencia, cantidad_mensajes])
 
-    def obtener_todas_duraciones(self):
-        query = "SELECT id_evento, id_coincidencia, cantidad_mensajes FROM duracion_conversacion_a_evento"
+    def obtener_todos_mensajes_por_evento(self):
+        query = "SELECT fecha_evento, id_evento, id_coincidencia, cantidad_mensajes FROM mensajes_por_evento"
         return list(self.session.execute(query))

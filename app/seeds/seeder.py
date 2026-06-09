@@ -1,5 +1,6 @@
 import sys
 import hashlib
+import json
 from datetime import datetime, date, timedelta
 from app.databases.postgres_conn import get_postgres_connection
 from app.databases.redis_conn import get_redis_client
@@ -43,9 +44,7 @@ class Seeder:
         # 4. Cassandra
         cluster, session = get_cassandra_session()
         session.execute("TRUNCATE estadisticas_coincidencias_por_dia;")
-        session.execute("TRUNCATE swipes_perfil_por_dia;")
-        session.execute("TRUNCATE swipes_perfil_total;")
-        session.execute("TRUNCATE duracion_conversacion_a_evento;")
+        session.execute("TRUNCATE mensajes_por_evento;")
         print("- Cassandra limpia.")
 
         # 5. Neo4j
@@ -82,8 +81,7 @@ class Seeder:
 
         # 1.1 Feriados
         feriados = [
-            (today.strftime("%Y-%m-%d"), "Día del Seeder Especial"),
-            (day_2_ago.strftime("%Y-%m-%d"), "Feriado Histórico"),
+            (day_1_ago.strftime("%Y-%m-%d"), "Feriado Histórico"),
             ("2026-01-01", "Año Nuevo"),
             ("2026-05-25", "Revolución de Mayo"),
             ("2026-07-09", "Día de la Independencia"),
@@ -124,6 +122,9 @@ class Seeder:
             "Agustina": datetime.combine(day_1_ago, datetime.min.time()) + timedelta(hours=8, minutes=20, seconds=11),
             "Joaquin": datetime.combine(day_1_ago, datetime.min.time()) + timedelta(hours=16, minutes=35, seconds=48)
         }
+
+        # Sort users chronologically by registration date/time to make database IDs chronological
+        usuarios_data.sort(key=lambda u: user_reg_dates[u["nombre"]])
 
         name_to_id = {}
         for u in usuarios_data:
@@ -188,59 +189,59 @@ class Seeder:
                 """, (uid, f"{u['nombre'].lower()}_adicional.jpg", fecha_foto))
 
         # 1.6 Likes y Coincidencias
-        # Nicolas <-> Sofia (Día -3)
-        dt_nic_like = datetime.combine(day_3_ago, datetime.min.time()) + timedelta(hours=12, minutes=5, seconds=10)
+        # Nicolas <-> Sofia (Día -1 - Lunes - Feriado)
+        dt_nic_like = datetime.combine(day_1_ago, datetime.min.time()) + timedelta(hours=10, minutes=5, seconds=10)
         dt_sof_like = dt_nic_like + timedelta(minutes=24, seconds=45)
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Nicolas"], name_to_id["Sofia"], dt_nic_like))
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Sofia"], name_to_id["Nicolas"], dt_sof_like))
         pg_cur.execute("""
-            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia)
-            VALUES (%s, %s, %s) RETURNING id_coincidencia;
-        """, (min(name_to_id["Nicolas"], name_to_id["Sofia"]), max(name_to_id["Nicolas"], name_to_id["Sofia"]), dt_sof_like))
+            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia, fecha_feriado)
+            VALUES (%s, %s, %s, %s) RETURNING id_coincidencia;
+        """, (min(name_to_id["Nicolas"], name_to_id["Sofia"]), max(name_to_id["Nicolas"], name_to_id["Sofia"]), dt_sof_like, day_1_ago))
         coin_nic_sof = pg_cur.fetchone()[0]
 
-        # Juan <-> Martina (Día -2 - Feriado)
-        dt_jua_like = datetime.combine(day_2_ago, datetime.min.time()) + timedelta(hours=14, minutes=12, seconds=30)
+        # Juan <-> Martina (Día -1 - Lunes - Feriado)
+        dt_jua_like = datetime.combine(day_1_ago, datetime.min.time()) + timedelta(hours=14, minutes=12, seconds=30)
         dt_mar_like = dt_jua_like + timedelta(minutes=8, seconds=15)
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Juan"], name_to_id["Martina"], dt_jua_like))
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Martina"], name_to_id["Juan"], dt_mar_like))
         pg_cur.execute("""
             INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia, fecha_feriado)
             VALUES (%s, %s, %s, %s) RETURNING id_coincidencia;
-        """, (min(name_to_id["Juan"], name_to_id["Martina"]), max(name_to_id["Juan"], name_to_id["Martina"]), dt_mar_like, day_2_ago))
+        """, (min(name_to_id["Juan"], name_to_id["Martina"]), max(name_to_id["Juan"], name_to_id["Martina"]), dt_mar_like, day_1_ago))
         coin_jua_mar = pg_cur.fetchone()[0]
 
-        # Lucas <-> Camila (Día -1)
-        dt_luc_like = datetime.combine(day_1_ago, datetime.min.time()) + timedelta(hours=10, minutes=22, seconds=40)
+        # Lucas <-> Camila (Día -1 - Lunes - Feriado)
+        dt_luc_like = datetime.combine(day_1_ago, datetime.min.time()) + timedelta(hours=18, minutes=22, seconds=40)
         dt_cam_like = dt_luc_like + timedelta(minutes=11, seconds=10)
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Lucas"], name_to_id["Camila"], dt_luc_like))
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Camila"], name_to_id["Lucas"], dt_cam_like))
         pg_cur.execute("""
-            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia)
-            VALUES (%s, %s, %s) RETURNING id_coincidencia;
-        """, (min(name_to_id["Lucas"], name_to_id["Camila"]), max(name_to_id["Lucas"], name_to_id["Camila"]), dt_cam_like))
+            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia, fecha_feriado)
+            VALUES (%s, %s, %s, %s) RETURNING id_coincidencia;
+        """, (min(name_to_id["Lucas"], name_to_id["Camila"]), max(name_to_id["Lucas"], name_to_id["Camila"]), dt_cam_like, day_1_ago))
         coin_luc_cam = pg_cur.fetchone()[0]
 
-        # Diego <-> Valentina (Día 0 - Hoy)
+        # Diego <-> Valentina (Día 0 - Martes - Sin Feriado)
         dt_die_like = datetime.combine(day_0, datetime.min.time()) + timedelta(hours=11, minutes=5, seconds=0)
         dt_val_like = dt_die_like + timedelta(minutes=6, seconds=35)
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Diego"], name_to_id["Valentina"], dt_die_like))
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Valentina"], name_to_id["Diego"], dt_val_like))
         pg_cur.execute("""
-            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia, fecha_feriado)
-            VALUES (%s, %s, %s, %s) RETURNING id_coincidencia;
-        """, (min(name_to_id["Diego"], name_to_id["Valentina"]), max(name_to_id["Diego"], name_to_id["Valentina"]), dt_val_like, day_0))
+            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia)
+            VALUES (%s, %s, %s) RETURNING id_coincidencia;
+        """, (min(name_to_id["Diego"], name_to_id["Valentina"]), max(name_to_id["Diego"], name_to_id["Valentina"]), dt_val_like))
         coin_die_val = pg_cur.fetchone()[0]
 
-        # Joaquin <-> Agustina (Día 0 - Hoy)
+        # Joaquin <-> Agustina (Día 0 - Martes - Sin Feriado)
         dt_joa_like = datetime.combine(day_0, datetime.min.time()) + timedelta(hours=12, minutes=45, seconds=15)
         dt_agu_like = dt_joa_like + timedelta(minutes=9, seconds=50)
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Joaquin"], name_to_id["Agustina"], dt_joa_like))
         pg_cur.execute("INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like) VALUES (%s, %s, %s);", (name_to_id["Agustina"], name_to_id["Joaquin"], dt_agu_like))
         pg_cur.execute("""
-            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia, fecha_feriado)
-            VALUES (%s, %s, %s, %s) RETURNING id_coincidencia;
-        """, (min(name_to_id["Joaquin"], name_to_id["Agustina"]), max(name_to_id["Joaquin"], name_to_id["Agustina"]), dt_agu_like, day_0))
+            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_coincidencia)
+            VALUES (%s, %s, %s) RETURNING id_coincidencia;
+        """, (min(name_to_id["Joaquin"], name_to_id["Agustina"]), max(name_to_id["Joaquin"], name_to_id["Agustina"]), dt_agu_like))
         coin_joa_agu = pg_cur.fetchone()[0]
 
         # Likes unilaterales de Mateo (Día 0 - Hoy)
@@ -322,6 +323,148 @@ class Seeder:
             INSERT INTO bloqueos (id_bloqueador, id_bloqueado, fecha_bloqueo, fecha_desbloqueo, activo)
             VALUES (%s, %s, %s, %s, FALSE);
         """, (name_to_id["Juan"], name_to_id["Mateo"], dt_blk_jua_mat, dt_unblk_jua_mat))
+
+        # 1.10 Poblar notificaciones en PostgreSQL
+        print("Poblando notificaciones en PostgreSQL...")
+        
+        # We need the last action time for each user to decide if notification is read/unread
+        user_actions = {}
+        
+        # Likes
+        pg_cur.execute("SELECT id_usuario_origen, fecha_like FROM likes;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # Messages
+        pg_cur.execute("SELECT id_emisor, fecha_envio FROM mensajes;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # Events proposed
+        pg_cur.execute("SELECT id_organizador, fecha_creacion FROM eventos;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # Event responses
+        pg_cur.execute("SELECT id_usuario, fecha_respuesta FROM asistencia_eventos WHERE fecha_respuesta IS NOT NULL;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # Blocks
+        pg_cur.execute("SELECT id_bloqueador, fecha_bloqueo FROM bloqueos;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # Unblocks
+        pg_cur.execute("SELECT id_bloqueador, fecha_desbloqueo FROM bloqueos WHERE fecha_desbloqueo IS NOT NULL;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        user_last_action = {uid: max(times) for uid, times in user_actions.items() if times}
+
+        notifs_to_insert = []
+        
+        # 1. Likes & Matches notifications
+        pg_cur.execute("SELECT id_like, id_usuario_origen, id_usuario_destino, fecha_like FROM likes ORDER BY fecha_like ASC;")
+        likes_rows = pg_cur.fetchall()
+        
+        pg_cur.execute("SELECT id_coincidencia, id_usuario1, id_usuario2 FROM coincidencias;")
+        matches_map = {}
+        for row in pg_cur.fetchall():
+            key = (min(row[1], row[2]), max(row[1], row[2]))
+            matches_map[key] = row[0]
+            
+        swiped_pairs = set()
+        for id_like, uid_origen, uid_destino, fecha_like in likes_rows:
+            if (uid_destino, uid_origen) in swiped_pairs:
+                # Match notifications for both
+                key = (min(uid_origen, uid_destino), max(uid_origen, uid_destino))
+                match_id = matches_map.get(key)
+                
+                notifs_to_insert.append({
+                    "id_usuario": uid_origen,
+                    "tipo": "COINCIDENCIA",
+                    "id_coincidencia": match_id,
+                    "fecha": fecha_like
+                })
+                notifs_to_insert.append({
+                    "id_usuario": uid_destino,
+                    "tipo": "COINCIDENCIA",
+                    "id_coincidencia": match_id,
+                    "fecha": fecha_like
+                })
+            else:
+                # Unilateral like notification to destination
+                notifs_to_insert.append({
+                    "id_usuario": uid_destino,
+                    "tipo": "LIKE",
+                    "id_like": id_like,
+                    "fecha": fecha_like
+                })
+            swiped_pairs.add((uid_origen, uid_destino))
+            
+        # 2. Message notifications
+        pg_cur.execute("""
+            SELECT m.id_mensaje, m.id_coincidencia, m.id_emisor, m.fecha_envio, c.id_usuario1, c.id_usuario2
+            FROM mensajes m
+            JOIN coincidencias c ON m.id_coincidencia = c.id_coincidencia;
+        """)
+        for row in pg_cur.fetchall():
+            msg_id, coin_id, emisor_id, send_date, u1, u2 = row
+            receptor_id = u2 if emisor_id == u1 else u1
+            notifs_to_insert.append({
+                "id_usuario": receptor_id,
+                "tipo": "MENSAJE",
+                "id_mensaje": msg_id,
+                "fecha": send_date
+            })
+            
+        # 3. Event proposal notifications
+        pg_cur.execute("SELECT id_evento, id_organizador, id_coincidencia, fecha_creacion FROM eventos;")
+        for row in pg_cur.fetchall():
+            ev_id, organizer_id, coin_id, ev_creation = row
+            pg_cur.execute("SELECT id_usuario1, id_usuario2 FROM coincidencias WHERE id_coincidencia = %s;", (coin_id,))
+            c_row = pg_cur.fetchone()
+            invitee_id = c_row[1] if organizer_id == c_row[0] else c_row[0]
+            notifs_to_insert.append({
+                "id_usuario": invitee_id,
+                "tipo": "EVENTO",
+                "id_evento": ev_id,
+                "fecha": ev_creation
+            })
+            
+        # 4. Event response notifications (accepted / rejected)
+        pg_cur.execute("SELECT id_evento, id_usuario, estado, fecha_respuesta FROM asistencia_eventos WHERE estado IN ('ACEPTADA', 'RECHAZADA');")
+        for row in pg_cur.fetchall():
+            event_id, guest_id, state, resp_date = row
+            pg_cur.execute("SELECT id_organizador FROM eventos WHERE id_evento = %s;", (event_id,))
+            org_id = pg_cur.fetchone()[0]
+            notifs_to_insert.append({
+                "id_usuario": org_id,
+                "tipo": "EVENTO",
+                "id_evento": event_id,
+                "fecha": resp_date
+            })
+            
+        # Insert them into Postgres
+        for n in notifs_to_insert:
+            uid = n["id_usuario"]
+            tipo = n["tipo"]
+            fecha = n["fecha"]
+            id_like = n.get("id_like")
+            id_coin = n.get("id_coincidencia")
+            id_msg = n.get("id_mensaje")
+            id_ev = n.get("id_evento")
+            
+            last_act = user_last_action.get(uid)
+            leida = False
+            if last_act and fecha <= last_act:
+                leida = True
+                
+            pg_cur.execute("""
+                INSERT INTO notificaciones (id_usuario, tipo, id_like, id_coincidencia, id_mensaje, id_evento, leida, fecha_creacion)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+            """, (uid, tipo, id_like, id_coin, id_msg, id_ev, leida, fecha))
 
         pg_conn.commit()
         pg_cur.close()
@@ -581,6 +724,81 @@ class Seeder:
                     "detalles": {"id_bloqueado": blocked_id}
                 })
 
+        # Reconstruct session logins/logouts chronologically based on when actions occurred
+        user_actions = {}
+        
+        # Get registration date for each user to enforce safety boundary
+        pg_cur.execute("SELECT id_usuario, fecha_registro FROM usuarios;")
+        user_reg_bounds = {row[0]: row[1] for row in pg_cur.fetchall()}
+            
+        # 1. Likes
+        pg_cur.execute("SELECT id_usuario_origen, fecha_like FROM likes;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # 2. Messages
+        pg_cur.execute("SELECT id_emisor, fecha_envio FROM mensajes;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # 3. Events proposed
+        pg_cur.execute("SELECT id_organizador, fecha_creacion FROM eventos;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # 4. Event responses
+        pg_cur.execute("SELECT id_usuario, fecha_respuesta FROM asistencia_eventos WHERE fecha_respuesta IS NOT NULL;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # 5. Blocks
+        pg_cur.execute("SELECT id_bloqueador, fecha_bloqueo FROM bloqueos;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # 6. Unblocks
+        pg_cur.execute("SELECT id_bloqueador, fecha_desbloqueo FROM bloqueos WHERE fecha_desbloqueo IS NOT NULL;")
+        for row in pg_cur.fetchall():
+            user_actions.setdefault(row[0], []).append(row[1])
+            
+        # Group actions into sessions (max gap: 2 hours) and generate logs
+        for uid, times in user_actions.items():
+            sorted_times = sorted(times)
+            if not sorted_times:
+                continue
+                
+            sessions = []
+            current_start = sorted_times[0] - timedelta(minutes=5)
+            current_last = sorted_times[0]
+            
+            for t in sorted_times[1:]:
+                if t - current_last <= timedelta(hours=2):
+                    current_last = t
+                else:
+                    sessions.append((current_start, current_last + timedelta(minutes=15)))
+                    current_start = t - timedelta(minutes=5)
+                    current_last = t
+            sessions.append((current_start, current_last + timedelta(minutes=15)))
+            
+            reg_date = user_reg_bounds.get(uid)
+            for start_t, end_t in sessions:
+                # Enforce that session start cannot be before registration date
+                if reg_date:
+                    start_t = max(start_t, reg_date)
+                    
+                logs.append({
+                    "tipo_evento": "INICIO_SESION",
+                    "id_usuario": uid,
+                    "fecha": start_t,
+                    "detalles": {}
+                })
+                logs.append({
+                    "tipo_evento": "CIERRE_SESION",
+                    "id_usuario": uid,
+                    "fecha": end_t,
+                    "detalles": {}
+                })
+
         # Sort logs chronologically by fecha
         logs.sort(key=lambda x: x["fecha"])
 
@@ -615,40 +833,20 @@ class Seeder:
                 VALUES (%s, %s, %s, %s);
             """, [f_date, count, cant_fds, cant_fer])
 
-        # 4.2 swipes_perfil_por_dia
-        pg_cur.execute("SELECT date(fecha_like), id_usuario_destino, count(*) FROM likes GROUP BY date(fecha_like), id_usuario_destino;")
-        likes_by_day = pg_cur.fetchall()
-        for row in likes_by_day:
-            f_date, dest_id, count = row
-            cass_session.execute("""
-                INSERT INTO swipes_perfil_por_dia (fecha, id_usuario_destino, cantidad_likes)
-                VALUES (%s, %s, %s);
-            """, [f_date, dest_id, count])
-
-        # 4.3 swipes_perfil_total
-        pg_cur.execute("SELECT id_usuario_destino, count(*) FROM likes GROUP BY id_usuario_destino;")
-        likes_totals = pg_cur.fetchall()
-        for row in likes_totals:
-            dest_id, count = row
-            cass_session.execute("""
-                INSERT INTO swipes_perfil_total (id_usuario_destino, cantidad_likes_total)
-                VALUES (%s, %s);
-            """, [dest_id, count])
-
-        # 4.4 duracion_conversacion_a_evento
-        pg_cur.execute("SELECT id_evento, id_coincidencia, fecha_creacion FROM eventos;")
+        # 4.4 mensajes_por_evento
+        pg_cur.execute("SELECT id_evento, id_coincidencia, fecha, fecha_creacion FROM eventos;")
         events = pg_cur.fetchall()
         for row in events:
-            ev_id, coin_id, ev_creation = row
+            ev_id, coin_id, ev_date, ev_creation = row
             
             # Query number of messages in this match sent before event creation
             pg_cur.execute("SELECT count(*) FROM mensajes WHERE id_coincidencia = %s AND fecha_envio <= %s;", (coin_id, ev_creation))
             msg_count = pg_cur.fetchone()[0]
             
             cass_session.execute("""
-                INSERT INTO duracion_conversacion_a_evento (id_evento, id_coincidencia, cantidad_mensajes)
-                VALUES (%s, %s, %s);
-            """, [ev_id, coin_id, msg_count])
+                INSERT INTO mensajes_por_evento (fecha_evento, id_evento, id_coincidencia, cantidad_mensajes)
+                VALUES (%s, %s, %s, %s);
+            """, [ev_date.date(), ev_id, coin_id, msg_count])
 
         pg_cur.close()
         pg_conn.close()
@@ -669,6 +867,90 @@ class Seeder:
         for row in pg_cur.fetchall():
             dest_id, count = row
             r_client.zadd(f"top_swipes_dia:{today.strftime('%Y-%m-%d')}", {str(dest_id): count})
+            
+        # Sync unread count and latest 10 notifications for each user in Redis
+        pg_cur.execute("""
+            SELECT id_usuario, count(*)
+            FROM notificaciones
+            WHERE leida = FALSE
+            GROUP BY id_usuario;
+        """)
+        unread_counts = {row[0]: row[1] for row in pg_cur.fetchall()}
+        
+        pg_cur.execute("SELECT id_usuario FROM usuarios;")
+        user_ids = [r[0] for r in pg_cur.fetchall()]
+        
+        for uid in user_ids:
+            # Set unread count (reset to 0 if not found)
+            count = unread_counts.get(uid, 0)
+            r_client.set(f"notificaciones_cantidad:{uid}", count)
+            
+            # Fetch the last 10 notifications for this user, sorted oldest first (ASC) for LPUSH
+            pg_cur.execute("""
+                SELECT id_notificacion, tipo, id_like, id_coincidencia, id_mensaje, id_evento, fecha_creacion
+                FROM notificaciones
+                WHERE id_usuario = %s
+                ORDER BY fecha_creacion DESC
+                LIMIT 10;
+            """, (uid,))
+            notifs_desc = pg_cur.fetchall()
+            notifs_asc = list(reversed(notifs_desc))
+            
+            key = f"notificaciones_tipos:{uid}"
+            r_client.delete(key) # Clear first
+            
+            for row in notifs_asc:
+                notif_id, tipo, id_like, id_coin, id_msg, id_ev, fecha = row
+                
+                mensaje_text = "Nueva notificación"
+                if tipo == "LIKE":
+                    mensaje_text = "A alguien le gustó tu perfil"
+                elif tipo == "COINCIDENCIA":
+                    pg_cur.execute("SELECT id_usuario1, id_usuario2 FROM coincidencias WHERE id_coincidencia = %s;", (id_coin,))
+                    coin_row = pg_cur.fetchone()
+                    other_uid = coin_row[1] if coin_row[0] == uid else coin_row[0]
+                    pg_cur.execute("SELECT nombre FROM usuarios WHERE id_usuario = %s;", (other_uid,))
+                    other_name = pg_cur.fetchone()[0]
+                    mensaje_text = f"¡Tuviste una coincidencia con {other_name}!"
+                elif tipo == "MENSAJE":
+                    pg_cur.execute("""
+                        SELECT u.nombre, m.contenido
+                        FROM mensajes m
+                        JOIN usuarios u ON m.id_emisor = u.id_usuario
+                        WHERE m.id_mensaje = %s;
+                    """, (id_msg,))
+                    msg_row = pg_cur.fetchone()
+                    sender_name, content = msg_row
+                    mensaje_text = f"Nuevo mensaje de {sender_name}: {content[:20]}..."
+                elif tipo == "EVENTO":
+                    pg_cur.execute("SELECT nombre_evento, id_organizador FROM eventos WHERE id_evento = %s;", (id_ev,))
+                    ev_row = pg_cur.fetchone()
+                    nombre_evento, organizer_id = ev_row
+                    
+                    if organizer_id == uid:
+                        pg_cur.execute("SELECT id_usuario, estado FROM asistencia_eventos WHERE id_evento = %s;", (id_ev,))
+                        asist_row = pg_cur.fetchone()
+                        guest_id, estado = asist_row
+                        pg_cur.execute("SELECT nombre FROM usuarios WHERE id_usuario = %s;", (guest_id,))
+                        guest_name = pg_cur.fetchone()[0]
+                        
+                        if estado == 'ACEPTADA':
+                            mensaje_text = f"{guest_name} aceptó tu cita: {nombre_evento}"
+                        else:
+                            mensaje_text = f"{guest_name} rechazó tu cita: {nombre_evento}"
+                    else:
+                        pg_cur.execute("SELECT nombre FROM usuarios WHERE id_usuario = %s;", (organizer_id,))
+                        org_name = pg_cur.fetchone()[0]
+                        mensaje_text = f"{org_name} te propuso una cita: {nombre_evento}"
+                
+                notif_payload = {
+                    "id_notificacion": notif_id,
+                    "tipo": tipo,
+                    "mensaje": mensaje_text,
+                    "fecha": fecha.isoformat()
+                }
+                r_client.lpush(key, json.dumps(notif_payload))
+                r_client.ltrim(key, 0, 9)
             
         pg_cur.close()
         pg_conn.close()

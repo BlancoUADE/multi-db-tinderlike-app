@@ -23,6 +23,42 @@ class ReportService:
         promedio = total_coincidencias / total_dias if total_dias > 0 else 0.0
         return promedio, total_coincidencias
 
+    def reporte_coincidencias_por_rango(self, fecha_inicio_str, fecha_fin_str):
+        from datetime import datetime, timedelta
+        try:
+            start_date = datetime.strptime(fecha_inicio_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(fecha_fin_str, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError("Formato de fecha inválido. Use AAAA-MM-DD.")
+            
+        if start_date > end_date:
+            raise ValueError("La fecha de inicio debe ser anterior o igual a la de fin.")
+            
+        if (end_date - start_date).days > 31:
+            raise ValueError("El rango de fechas no puede superar los 31 días.")
+            
+        results = []
+        current = start_date
+        while current <= end_date:
+            row = self.cassandra_repo.obtener_match_stats_por_fecha(current)
+            if row:
+                results.append({
+                    "fecha": current,
+                    "cantidad_coincidencias": row.cantidad_coincidencias,
+                    "cantidad_fin_de_semana": row.cantidad_fin_de_semana,
+                    "cantidad_feriado": row.cantidad_feriado
+                })
+            else:
+                results.append({
+                    "fecha": current,
+                    "cantidad_coincidencias": 0,
+                    "cantidad_fin_de_semana": 0,
+                    "cantidad_feriado": 0
+                })
+            current += timedelta(days=1)
+            
+        return results
+
     # --- REPORTE 2: Atributos más populares en perfiles (MongoDB) ---
     def reporte_atributos_mas_populares(self):
         generos = self.mongo_repo.obtener_distribucion_generos()
@@ -41,7 +77,7 @@ class ReportService:
             "promedio_fotos": round(prom_fotos, 1)
         }
 
-    # --- REPORTE 3: Perfiles con más swipes a la derecha (Redis + Cassandra) ---
+    # --- REPORTE 3: Perfiles con más swipes a la derecha (Redis) ---
     def reporte_top_swipes(self, limit=10):
         # 1. Daily swipes ranking from Redis ZSET
         today_str = date.today().strftime("%Y-%m-%d")
@@ -52,22 +88,13 @@ class ReportService:
             nombre = user["nombre"] if user else f"Usuario #{uid}"
             top_diario.append({"id_usuario": uid, "nombre": nombre, "swipes": score})
 
-        # 2. Historical swipes ranking from Cassandra
-        cass_top = self.cassandra_repo.obtener_top_swipes_historico(limit)
-        top_historico = []
-        for uid, score in cass_top:
-            user = self.pg_repo.obtener_usuario_por_id(uid)
-            nombre = user["nombre"] if user else f"Usuario #{uid}"
-            top_historico.append({"id_usuario": uid, "nombre": nombre, "swipes": score})
-
         return {
-            "top_diario": top_diario,
-            "top_historico": top_historico
+            "top_diario": top_diario
         }
 
     # --- REPORTE 4: Cantidad promedio de mensajes antes de una cita (Cassandra) ---
     def reporte_duracion_promedio_conversacion_cita(self):
-        stats = self.cassandra_repo.obtener_todas_duraciones()
+        stats = self.cassandra_repo.obtener_todos_mensajes_por_evento()
         if not stats:
             return 0.0, 0
         total_mensajes = sum(row.cantidad_mensajes for row in stats)

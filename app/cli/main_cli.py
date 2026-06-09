@@ -738,7 +738,7 @@ class TinderCLI:
             options = {
                 "1": "Promedio de coincidencias por día (Cassandra)",
                 "2": "Atributos más populares en perfiles (MongoDB)",
-                "3": "Perfiles con más swipes a la derecha (Redis/Cassandra)",
+                "3": "Perfiles con más swipes a la derecha (Redis)",
                 "4": "Cantidad promedio de mensajes antes de una cita (Cassandra)",
                 "5": "Intereses más comunes en coincidencias (Neo4j)",
                 "6": "Perfiles +10 fotos y +3 intereses en común (MongoDB/Neo4j)",
@@ -754,6 +754,31 @@ class TinderCLI:
                     print(f"\n--- Promedio de Coincidencias ---")
                     print(f" Cantidad total de coincidiencias registradas: {total}")
                     print(f" Promedio de coincidencias diario: {avg:.2f} por día.")
+                    
+                    ans = input("\n¿Desea ver el detalle de un rango de fechas/semanal? (S/N): ").strip().lower()
+                    if ans == 's':
+                        start_str = input("Ingrese la fecha de inicio (AAAA-MM-DD, ej: 2026-06-08): ").strip()
+                        end_str = input("Ingrese la fecha de fin (AAAA-MM-DD, ej: 2026-06-14): ").strip()
+                        if start_str and end_str:
+                            try:
+                                range_stats = self.report_service.reporte_coincidencias_por_rango(start_str, end_str)
+                                print(f"\n--- Coincidencias para el rango {start_str} al {end_str} ---")
+                                dias_nombre = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                                for day in range_stats:
+                                    f = day["fecha"]
+                                    dia_semana = dias_nombre[f.weekday()]
+                                    es_fds = "Fin de semana" if day['cantidad_fin_de_semana'] > 0 else ""
+                                    es_fer = "Feriado" if day['cantidad_feriado'] > 0 else ""
+                                    flags = " | ".join(filter(None, [es_fds, es_fer]))
+                                    flags_str = f" ({flags})" if flags else ""
+                                    print(f"  * {f.strftime('%Y-%m-%d')} ({dia_semana}): {day['cantidad_coincidencias']} coincidencias{flags_str}")
+                                
+                                total_rango = sum(d['cantidad_coincidencias'] for d in range_stats)
+                                prom_rango = total_rango / len(range_stats) if range_stats else 0.0
+                                print(f"\n Total coincidencias en el rango: {total_rango}")
+                                print(f" Promedio diario en el rango: {prom_rango:.2f} por día.")
+                            except ValueError as ve:
+                                print(f"\n[ERROR] {ve}")
                     input("\nPresione ENTER para volver...")
                     
                 elif choice == "2":
@@ -781,13 +806,6 @@ class TinderCLI:
                     else:
                         for idx, item in enumerate(rep["top_diario"]):
                             print(f"  [{idx+1}] {item['nombre']} (ID: {item['id_usuario']}): {item['swipes']} swipes recibidos.")
-                    
-                    print(f"\n--- Top Swipes Histórico (Cassandra) ---")
-                    if not rep["top_historico"]:
-                        print("  Aún sin datos de ranking histórico.")
-                    else:
-                        for idx, item in enumerate(rep["top_historico"]):
-                            print(f"  [{idx+1}] {item['nombre']} (ID: {item['id_usuario']}): {item['swipes']} swipes históricos.")
                     input("\nPresione ENTER para volver...")
                     
                 elif choice == "4":

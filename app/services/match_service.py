@@ -80,14 +80,13 @@ class MatchService:
 
         # 3. Cassandra Sync
         try:
-            self.cassandra_repo.registrar_like_stats(today_date, id_usuario_destino)
             if es_match:
                 # Check weekend
                 es_fin_de_semana = today_date.weekday() >= 5 # 5=Sat, 6=Sun
                 es_feriado = fecha_feriado is not None
                 self.cassandra_repo.registrar_coincidencia_stats(today_date, es_fin_de_semana, es_feriado)
         except Exception as e:
-            print(f"[SYNC ERROR] Cassandra swipes/match metrics sync failed: {e}")
+            print(f"[SYNC ERROR] Cassandra match metrics sync failed: {e}")
 
         # 4. Redis Sync
         try:
@@ -117,19 +116,19 @@ class MatchService:
                 notif_destino = self.pg_repo.crear_notificacion(id_usuario_destino, "COINCIDENCIA", id_coincidencia=id_coincidencia)
                 
                 # Notify both in Redis
-                self.redis_repo.incrementar_notificaciones_no_leidas(id_usuario_origen)
-                self.redis_repo.incrementar_notificaciones_no_leidas(id_usuario_destino)
+                self.redis_repo.incrementar_notificaciones_cantidad(id_usuario_origen)
+                self.redis_repo.incrementar_notificaciones_cantidad(id_usuario_destino)
                 
                 user_origen = self.pg_repo.obtener_usuario_por_id(id_usuario_origen)
                 user_destino = self.pg_repo.obtener_usuario_por_id(id_usuario_destino)
                 
-                self.redis_repo.agregar_notificacion_pendiente(id_usuario_origen, {
+                self.redis_repo.agregar_notificacion_tipo(id_usuario_origen, {
                     "id_notificacion": notif_origen,
                     "tipo": "COINCIDENCIA",
                     "mensaje": f"¡Tuviste una coincidencia con {user_destino['nombre']}!",
                     "fecha": today_dt.isoformat()
                 })
-                self.redis_repo.agregar_notificacion_pendiente(id_usuario_destino, {
+                self.redis_repo.agregar_notificacion_tipo(id_usuario_destino, {
                     "id_notificacion": notif_destino,
                     "tipo": "COINCIDENCIA",
                     "mensaje": f"¡Tuviste una coincidencia con {user_origen['nombre']}!",
@@ -147,8 +146,8 @@ class MatchService:
                 # Create like notification in Postgres
                 notif_id = self.pg_repo.crear_notificacion(id_usuario_destino, "LIKE", id_like=id_like)
                 
-                self.redis_repo.incrementar_notificaciones_no_leidas(id_usuario_destino)
-                self.redis_repo.agregar_notificacion_pendiente(id_usuario_destino, {
+                self.redis_repo.incrementar_notificaciones_cantidad(id_usuario_destino)
+                self.redis_repo.agregar_notificacion_tipo(id_usuario_destino, {
                     "id_notificacion": notif_id,
                     "tipo": "LIKE",
                     "mensaje": f"A alguien le gustó tu perfil",
@@ -205,9 +204,9 @@ class MatchService:
         
         # 3. Redis update for receptor
         try:
-            self.redis_repo.incrementar_notificaciones_no_leidas(id_receptor)
+            self.redis_repo.incrementar_notificaciones_cantidad(id_receptor)
             user_emisor = self.pg_repo.obtener_usuario_por_id(id_emisor)
-            self.redis_repo.agregar_notificacion_pendiente(id_receptor, {
+            self.redis_repo.agregar_notificacion_tipo(id_receptor, {
                 "id_notificacion": notif_id,
                 "tipo": "MENSAJE",
                 "mensaje": f"Nuevo mensaje de {user_emisor['nombre']}: {contenido[:20]}...",
@@ -254,13 +253,13 @@ class MatchService:
         
         # 2. Redis Reset
         try:
-            self.redis_repo.resetear_notificaciones_no_leidas(id_usuario)
+            self.redis_repo.resetear_notificaciones_cantidad(id_usuario)
         except Exception as e:
             print(f"[SYNC ERROR] Redis notifications reset failed: {e}")
 
     def obtener_contador_no_leidas(self, id_usuario):
         try:
-            return self.redis_repo.obtener_notificaciones_no_leidas_count(id_usuario)
+            return self.redis_repo.obtener_notificaciones_cantidad_count(id_usuario)
         except Exception:
             # Fallback to Postgres count
             notifs = self.pg_repo.obtener_notificaciones_no_leidas(id_usuario)

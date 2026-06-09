@@ -72,9 +72,9 @@ class EventService:
 
         # 4. Redis update for receptor
         try:
-            self.redis_repo.incrementar_notificaciones_no_leidas(id_receptor)
+            self.redis_repo.incrementar_notificaciones_cantidad(id_receptor)
             user_organizador = self.pg_repo.obtener_usuario_por_id(id_organizador)
-            self.redis_repo.agregar_notificacion_pendiente(id_receptor, {
+            self.redis_repo.agregar_notificacion_tipo(id_receptor, {
                 "id_notificacion": notif_id,
                 "tipo": "EVENTO",
                 "mensaje": f"{user_organizador['nombre']} te propuso una cita: {nombre_evento}",
@@ -97,7 +97,8 @@ class EventService:
         # 6. Update Cassandra messages-before-event metric
         try:
             cnt_mensajes = self.pg_repo.obtener_conteo_mensajes_antes_de(id_coincidencia, fecha_creacion_dt)
-            self.cassandra_repo.registrar_mensajes_antes_de_evento(id_evento, id_coincidencia, cnt_mensajes)
+            fecha_evento = fecha.date() if hasattr(fecha, 'date') else fecha
+            self.cassandra_repo.registrar_mensajes_antes_de_evento(fecha_evento, id_evento, id_coincidencia, cnt_mensajes)
         except Exception as e:
             print(f"[SYNC ERROR] Cassandra message count metrics sync failed: {e}")
 
@@ -147,9 +148,9 @@ class EventService:
 
         # 5. Redis notify
         try:
-            self.redis_repo.incrementar_notificaciones_no_leidas(id_organizador)
+            self.redis_repo.incrementar_notificaciones_cantidad(id_organizador)
             user_receptor = self.pg_repo.obtener_usuario_por_id(id_receptor)
-            self.redis_repo.agregar_notificacion_pendiente(id_organizador, {
+            self.redis_repo.agregar_notificacion_tipo(id_organizador, {
                 "id_notificacion": notif_id,
                 "tipo": "EVENTO",
                 "mensaje": f"{user_receptor['nombre']} aceptó tu cita: {evento['nombre_evento']}",
@@ -205,9 +206,9 @@ class EventService:
 
         # 3. Redis notify
         try:
-            self.redis_repo.incrementar_notificaciones_no_leidas(id_organizador)
+            self.redis_repo.incrementar_notificaciones_cantidad(id_organizador)
             user_receptor = self.pg_repo.obtener_usuario_por_id(id_receptor)
-            self.redis_repo.agregar_notificacion_pendiente(id_organizador, {
+            self.redis_repo.agregar_notificacion_tipo(id_organizador, {
                 "id_notificacion": notif_id,
                 "tipo": "EVENTO",
                 "mensaje": f"{user_receptor['nombre']} rechazó tu cita: {evento['nombre_evento']}",
