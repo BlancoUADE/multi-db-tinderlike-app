@@ -10,8 +10,13 @@ CREATE TABLE IF NOT EXISTS users (
     biografia TEXT DEFAULT '',
     pref_edad_min INTEGER DEFAULT 18,
     pref_edad_max INTEGER DEFAULT 99,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (pref_edad_min <= pref_edad_max)
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS biografia TEXT DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS pref_edad_min INTEGER DEFAULT 18;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS pref_edad_max INTEGER DEFAULT 99;
 
 -- Tabla fotos (DER)
 CREATE TABLE IF NOT EXISTS fotos (
@@ -59,7 +64,9 @@ CREATE TABLE IF NOT EXISTS likes (
     id_usuario_destino INTEGER REFERENCES users(id) ON DELETE CASCADE,
     tipo VARCHAR(20) NOT NULL DEFAULT 'like',  -- 'like' o 'dislike'
     fecha_like TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(id_usuario_origen, id_usuario_destino)
+    UNIQUE(id_usuario_origen, id_usuario_destino),
+    CHECK (tipo IN ('like', 'dislike')),
+    CHECK (id_usuario_origen <> id_usuario_destino)
 );
 
 -- Tabla mensajes (DER)
@@ -102,5 +109,16 @@ CREATE TABLE IF NOT EXISTS bloqueos_auditoria (
     id SERIAL PRIMARY KEY,
     bloqueador_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     bloqueado_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    fecha TIMESTAMPTZ DEFAULT NOW()
+    fecha TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (bloqueador_id <> bloqueado_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_users_age_gender ON users (edad, LOWER(genero));
+CREATE INDEX IF NOT EXISTS idx_fotos_usuario ON fotos (id_usuario);
+CREATE INDEX IF NOT EXISTS idx_likes_origen ON likes (id_usuario_origen);
+CREATE INDEX IF NOT EXISTS idx_likes_destino_tipo ON likes (id_usuario_destino, tipo);
+CREATE INDEX IF NOT EXISTS idx_mensajes_coincidencia_fecha ON mensajes (id_coincidencia, fecha_envio);
+CREATE INDEX IF NOT EXISTS idx_notificaciones_usuario ON notificaciones (id_usuario, leida);
+CREATE INDEX IF NOT EXISTS idx_bloqueos_bloqueador ON bloqueos_auditoria (bloqueador_id);
+CREATE INDEX IF NOT EXISTS idx_bloqueos_bloqueado ON bloqueos_auditoria (bloqueado_id);

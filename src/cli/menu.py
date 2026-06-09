@@ -1,4 +1,5 @@
 import sys
+from getpass import getpass
 from src.services.app_service import AppService
 
 class TinderCLI:
@@ -98,7 +99,10 @@ class TinderCLI:
         print("\n>>> REGISTRO DE NUEVO USUARIO <<<")
         nombre = self.ask_text("Nombre: ")
         email = self.ask_text("Email: ")
-        password = self.ask_text("Contraseña: ")
+        password = getpass("Contraseña: ").strip()
+        if not password:
+            print("La contraseña no puede estar vacía.")
+            return
         edad = self.ask_int("Edad: ", minimum=18)
         genero = self.ask_text("Género (Masculino/Femenino/Otro): ")
         ubicacion = self.ask_text("Ubicación (Ciudad/Provincia): ")
@@ -119,7 +123,10 @@ class TinderCLI:
     def do_login(self):
         print("\n>>> INICIO DE SESIÓN <<<")
         email = self.ask_text("Email: ")
-        password = self.ask_text("Contraseña: ")
+        password = getpass("Contraseña: ").strip()
+        if not password:
+            print("La contraseña no puede estar vacía.")
+            return
 
         try:
             user_info = self.service.login_user(email=email, password=password)

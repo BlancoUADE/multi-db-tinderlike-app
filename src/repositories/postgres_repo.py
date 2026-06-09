@@ -43,7 +43,8 @@ class PostgresRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, nombre, email, password_hash, edad, genero, ubicacion, created_at
+                    SELECT id, nombre, email, password_hash, edad, genero, ubicacion,
+                           biografia, pref_edad_min, pref_edad_max, created_at
                     FROM users
                     WHERE LOWER(email) = LOWER(%s);
                     """,
@@ -59,7 +60,10 @@ class PostgresRepository:
                         "edad": row[4],
                         "genero": row[5],
                         "ubicacion": row[6],
-                        "created_at": row[7]
+                        "biografia": row[7],
+                        "pref_edad_min": row[8],
+                        "pref_edad_max": row[9],
+                        "created_at": row[10]
                     }
                 return None
         finally:
@@ -72,7 +76,8 @@ class PostgresRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, nombre, email, password_hash, edad, genero, ubicacion, created_at
+                    SELECT id, nombre, email, password_hash, edad, genero, ubicacion,
+                           biografia, pref_edad_min, pref_edad_max, created_at
                     FROM users
                     WHERE id = %s;
                     """,
@@ -88,7 +93,10 @@ class PostgresRepository:
                         "edad": row[4],
                         "genero": row[5],
                         "ubicacion": row[6],
-                        "created_at": row[7]
+                        "biografia": row[7],
+                        "pref_edad_min": row[8],
+                        "pref_edad_max": row[9],
+                        "created_at": row[10]
                     }
                 return None
         finally:
@@ -103,13 +111,12 @@ class PostgresRepository:
             ex_list = list(exclude_ids) if exclude_ids else []
             ex_list.append(current_user_id)
             
-            # Format query for in-list
             query = """
                 SELECT id FROM users
-                WHERE id NOT IN %s
+                WHERE id <> ALL(%s)
                   AND edad BETWEEN %s AND %s
             """
-            params = [tuple(ex_list), edad_min, edad_max]
+            params = [ex_list, edad_min, edad_max]
             
             if gender_interest and gender_interest.lower() != "cualquiera":
                 query += " AND LOWER(genero) = LOWER(%s)"
@@ -429,6 +436,63 @@ class PostgresRepository:
         finally:
             conn.close()
 
+    def get_excluded_user_ids(self, user_id):
+        """Retrieve user IDs excluded by canonical PostgreSQL likes, matches and blocks."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id_usuario_destino
+                    FROM likes
+                    WHERE id_usuario_origen = %s
+
+                    UNION
+
+                    SELECT CASE
+                        WHEN user_id_1 = %s THEN user_id_2
+                        ELSE user_id_1
+                    END
+                    FROM coincidencias_confirmadas
+                    WHERE user_id_1 = %s OR user_id_2 = %s
+
+                    UNION
+
+                    SELECT bloqueado_id
+                    FROM bloqueos_auditoria
+                    WHERE bloqueador_id = %s
+
+                    UNION
+
+                    SELECT bloqueador_id
+                    FROM bloqueos_auditoria
+                    WHERE bloqueado_id = %s;
+                    """,
+                    (user_id, user_id, user_id, user_id, user_id, user_id)
+                )
+                return {row[0] for row in cur.fetchall() if row[0] is not None}
+        finally:
+            conn.close()
+
+    def has_like(self, user_from, user_to):
+        """Return True if user_from has an active like for user_to in PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM likes
+                    WHERE id_usuario_origen = %s
+                      AND id_usuario_destino = %s
+                      AND tipo = 'like';
+                    """,
+                    (user_from, user_to)
+                )
+                return cur.fetchone() is not None
+        finally:
+            conn.close()
+
     def add_photo(self, user_id, url_archivo, es_principal=False):
         """Add a photo for a user in PostgreSQL."""
         conn = get_postgres_connection()
@@ -448,6 +512,24 @@ class PostgresRepository:
         except Exception as e:
             conn.rollback()
             raise e
+        finally:
+            conn.close()
+
+    def get_user_photos(self, user_id):
+        """Retrieve a user's photos from PostgreSQL ordered by principal first."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT url_archivo
+                    FROM fotos
+                    WHERE id_usuario = %s
+                    ORDER BY es_principal DESC, fecha_subida ASC, id ASC;
+                    """,
+                    (user_id,)
+                )
+                return [row[0] for row in cur.fetchall()]
         finally:
             conn.close()
 
@@ -589,5 +671,24 @@ class PostgresRepository:
         except Exception as e:
             conn.rollback()
             raise e
+        finally:
+            conn.close()
+
+    def get_user_interests(self, user_id):
+        """Retrieve a user's interest names from PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT i.nombre
+                    FROM usuario_intereses ui
+                    JOIN intereses i ON i.id = ui.id_interes
+                    WHERE ui.id_usuario = %s
+                    ORDER BY i.nombre;
+                    """,
+                    (user_id,)
+                )
+                return [row[0] for row in cur.fetchall()]
         finally:
             conn.close()

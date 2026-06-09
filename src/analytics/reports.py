@@ -31,7 +31,7 @@ class ReportService:
     def get_avg_matches_per_day(self, fecha_desde=None, fecha_hasta=None):
         """
         Cassandra: matches_por_dia
-        Query: SELECT fecha FROM matches_por_dia WHERE fecha IN ?;
+        Query: SELECT fecha FROM matches_por_dia WHERE fecha = ?; repeated per day.
         """
         if fecha_hasta is None:
             fecha_hasta = datetime.date.today()
@@ -41,12 +41,13 @@ class ReportService:
         fechas = [fecha_desde + datetime.timedelta(days=i) for i in range((fecha_hasta - fecha_desde).days + 1)]
         
         session = get_cassandra_session()
-        stmt = session.prepare("SELECT fecha FROM matches_por_dia WHERE fecha IN ?;")
-        rows = session.execute(stmt, [fechas])
         matches_by_day = {}
-        for row in rows:
-            fecha_str = str(row.fecha)
-            matches_by_day[fecha_str] = matches_by_day.get(fecha_str, 0) + 1
+        stmt = session.prepare("SELECT fecha FROM matches_por_dia WHERE fecha = ?;")
+        for fecha in fechas:
+            rows = session.execute(stmt, [fecha])
+            count = sum(1 for _ in rows)
+            if count:
+                matches_by_day[str(fecha)] = count
         
         if not matches_by_day:
             return 0.0, {}
@@ -269,15 +270,16 @@ class ReportService:
 
         session = get_cassandra_session()
         raw_matches = []
-        stmt = session.prepare("SELECT fecha, match_id, user_1, user_2 FROM matches_por_dia WHERE fecha IN ?;")
-        rows = session.execute(stmt, [fechas_filtradas])
-        for row in rows:
-            raw_matches.append({
-                "fecha": row.fecha,
-                "match_id": row.match_id,
-                "user_1": row.user_1,
-                "user_2": row.user_2
-            })
+        stmt = session.prepare("SELECT fecha, match_id, user_1, user_2 FROM matches_por_dia WHERE fecha = ?;")
+        for fecha in fechas_filtradas:
+            rows = session.execute(stmt, [fecha])
+            for row in rows:
+                raw_matches.append({
+                    "fecha": row.fecha,
+                    "match_id": row.match_id,
+                    "user_1": row.user_1,
+                    "user_2": row.user_2
+                })
 
         filtered = []
         conn = get_postgres_connection()
@@ -333,6 +335,7 @@ class ReportService:
         # 1. Clean up existing test seed data to ensure idempotency
         # Seed users have emails like: * @testseed.com
         logger.info("Eliminando datos semilla previos...")
+        seed_ids = []
         pg_conn = get_postgres_connection()
         try:
             with pg_conn.cursor() as cur:
@@ -342,17 +345,23 @@ class ReportService:
                 
                 if seed_ids:
                     # Cascade deletions via Postgres
-                    cur.execute("DELETE FROM users WHERE id IN %s;", (tuple(seed_ids),))
+                    cur.execute("DELETE FROM users WHERE id = ANY(%s);", (seed_ids,))
                     pg_conn.commit()
         finally:
             pg_conn.close()
 
         # Clean Mongo
         mongo_db = get_mongodb_database()
-        mongo_db.perfiles.delete_many({"user_id": {"$in": seed_ids} if seed_ids else {"$exists": True}}) # Delete seed perfiles
-        mongo_db.notificaciones.delete_many({})
-        mongo_db.bloqueos.delete_many({})
-        mongo_db.eventos_logs.delete_many({})
+        if seed_ids:
+            mongo_db.perfiles.delete_many({"user_id": {"$in": seed_ids}})
+            mongo_db.notificaciones.delete_many({"user_id": {"$in": seed_ids}})
+            mongo_db.bloqueos.delete_many({
+                "$or": [
+                    {"bloqueador_id": {"$in": seed_ids}},
+                    {"bloqueado_id": {"$in": seed_ids}}
+                ]
+            })
+            mongo_db.eventos_logs.delete_many({"organizador_id": {"$in": seed_ids}})
 
         # Clean Neo4j
         neo4j_driver = get_neo4j_driver()

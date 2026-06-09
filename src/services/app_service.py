@@ -10,6 +10,7 @@ from src.repositories.cassandra_repo import CassandraRepository
 
 # Set up simple logging
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
 class AppService:
@@ -156,33 +157,45 @@ class AppService:
         return self.redis_repo.get_user_id_by_token(token)
 
     def get_user_profile(self, token):
-        """Get the profile document of the currently logged-in user, merging PG and Neo4j data."""
+        """Get the profile using PostgreSQL as the DER source of truth."""
         user_id = self.get_current_user_id(token)
         if user_id is None:
             raise PermissionError("Sesión inválida o expirada.")
-        
-        profile = self.mongo_repo.get_profile(user_id)
-        if not profile:
-            profile = {}
-        
-        # Add basic user structural data from Postgres
+
         user_info = self.pg_repo.get_user_by_id(user_id)
-        if user_info:
-            profile["nombre"] = user_info["nombre"]
-            profile["edad"] = user_info["edad"]
-            profile["genero"] = user_info["genero"]
-            profile["ubicacion"] = user_info["ubicacion"]
-            
-        # Add interests from Neo4j
+        if not user_info:
+            raise ValueError("El usuario no existe en PostgreSQL.")
+
+        mongo_profile = self.mongo_repo.get_profile(user_id) or {}
+        mongo_prefs = mongo_profile.get("preferencias", {})
+        fotos = self.pg_repo.get_user_photos(user_id) or mongo_profile.get("fotos", [])
+
+        profile = {
+            "user_id": user_id,
+            "nombre": user_info["nombre"],
+            "edad": user_info["edad"],
+            "genero": user_info["genero"],
+            "ubicacion": user_info["ubicacion"],
+            "biografia": user_info.get("biografia") or "",
+            "fotos": fotos,
+            "preferencias": {
+                "edad_min": user_info.get("pref_edad_min") or 18,
+                "edad_max": user_info.get("pref_edad_max") or 99,
+                "genero_interes": mongo_prefs.get("genero_interes", "Cualquiera")
+            },
+            "caracteristicas": mongo_profile.get("caracteristicas", {}),
+            "intereses": self.pg_repo.get_user_interests(user_id)
+        }
+
         try:
             query = "MATCH (u:Usuario {id: $user_id})-[:TIENE_INTERES]->(i:Interes) RETURN i.nombre AS interes"
             with self.neo4j_repo.driver.session() as session:
                 res = session.run(query, user_id=user_id)
-                profile["intereses"] = [row["interes"] for row in res]
+                profile["intereses_grafo"] = [row["interes"] for row in res]
         except Exception as e:
             logger.error(f"Failed to fetch user interests from Neo4j: {e}")
-            profile["intereses"] = []
-            
+            profile["intereses_grafo"] = []
+
         return profile
 
     def update_profile(self, token, biografia, caracteristicas, preferencias, intereses):
@@ -199,30 +212,31 @@ class AppService:
         if user_id is None:
             raise PermissionError("Sesión inválida o expirada.")
         
-        # 2. MongoDB actualiza el perfil extendido e historial de cambios
-        self.mongo_repo.update_profile_fields(
-            user_id=user_id,
-            biografia=biografia,
-            caracteristicas=caracteristicas,
-            preferencias=preferencias,
-            intereses=intereses
-        )
-        
-        # 3. Neo4j actualiza las relaciones de intereses
+        pref_edad_min = preferencias.get('edad_min', 18)
+        pref_edad_max = preferencias.get('edad_max', 99)
+
+        # 2. PostgreSQL confirma los datos del DER como fuente de verdad.
+        self.pg_repo.update_user_profile_fields(user_id, biografia, pref_edad_min, pref_edad_max)
+        self.pg_repo.update_user_interests(user_id, intereses)
+
+        # 3. MongoDB actualiza la vista documental del perfil.
+        try:
+            self.mongo_repo.update_profile_fields(
+                user_id=user_id,
+                biografia=biografia,
+                caracteristicas=caracteristicas,
+                preferencias=preferencias,
+                intereses=intereses
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo proyectar el perfil en MongoDB: {e}. PostgreSQL queda como fuente de verdad.")
+
+        # 4. Neo4j actualiza la proyección de intereses.
         try:
             self.neo4j_repo.update_interests(user_id, intereses)
         except Exception as e:
             # Registrar warning y continuar asumiendo consistencia eventual
             logger.warning(f"No se pudieron actualizar los intereses en Neo4j: {e}. Consistencia eventual asumida.")
-            
-        # 4. PostgreSQL: Sincronizar campos principales de perfil e intereses
-        try:
-            pref_edad_min = preferencias.get('edad_min', 18)
-            pref_edad_max = preferencias.get('edad_max', 99)
-            self.pg_repo.update_user_profile_fields(user_id, biografia, pref_edad_min, pref_edad_max)
-            self.pg_repo.update_user_interests(user_id, intereses)
-        except Exception as e:
-            logger.warning(f"No se pudo sincronizar perfil/intereses en PostgreSQL: {e}.")
 
     def add_user_photo(self, token, photo_url):
         """
@@ -234,13 +248,14 @@ class AppService:
         if user_id is None:
             raise PermissionError("Sesión inválida o expirada.")
         
-        self.mongo_repo.add_photo(user_id, photo_url)
-        
-        # Sincronizar foto en PostgreSQL
+        # PostgreSQL confirma la foto del DER como fuente de verdad.
+        self.pg_repo.add_photo(user_id, photo_url)
+
+        # MongoDB mantiene la vista documental del perfil.
         try:
-            self.pg_repo.add_photo(user_id, photo_url)
+            self.mongo_repo.add_photo(user_id, photo_url)
         except Exception as e:
-            logger.warning(f"No se pudo sincronizar foto en PostgreSQL: {e}")
+            logger.warning(f"No se pudo proyectar la foto en MongoDB: {e}. PostgreSQL queda como fuente de verdad.")
 
     def get_next_candidate(self, token):
         """
@@ -268,15 +283,20 @@ class AppService:
         cached_count = self.redis_repo.get_candidates_count(user_id)
         if cached_count == 0:
             logger.info(f"Cache miss for candidates of user {user_id}. Generating list...")
-            # 1. Get current preferences from MongoDB
-            profile = self.mongo_repo.get_profile(user_id)
+            # 1. Get canonical age preferences from PostgreSQL and flexible gender preference from MongoDB
+            user_pg = self.pg_repo.get_user_by_id(user_id)
+            profile = self.mongo_repo.get_profile(user_id) or {}
             prefs = profile.get("preferencias", {})
-            edad_min = prefs.get("edad_min", 18)
-            edad_max = prefs.get("edad_max", 99)
+            edad_min = user_pg.get("pref_edad_min", 18) if user_pg else 18
+            edad_max = user_pg.get("pref_edad_max", 99) if user_pg else 99
             genero_interes = prefs.get("genero_interes", "Cualquiera")
             
-            # 2. Get exclusions from Neo4j
-            exclude_ids = self.neo4j_repo.get_excluded_user_ids(user_id)
+            # 2. Get canonical exclusions from PostgreSQL and enrich with Neo4j projection.
+            exclude_ids = self.pg_repo.get_excluded_user_ids(user_id)
+            try:
+                exclude_ids = exclude_ids | self.neo4j_repo.get_excluded_user_ids(user_id)
+            except Exception as e:
+                logger.warning(f"No se pudieron leer exclusiones desde Neo4j: {e}. Se usan exclusiones de PostgreSQL.")
             
             # 3. Query Postgres for compatible users
             compatible_ids = self.pg_repo.get_users_by_filter(
@@ -300,7 +320,8 @@ class AppService:
             
         # Get details
         candidate_pg = self.pg_repo.get_user_by_id(candidate_id)
-        candidate_mongo = self.mongo_repo.get_profile(candidate_id)
+        candidate_mongo = self.mongo_repo.get_profile(candidate_id) or {}
+        candidate_photos = self.pg_repo.get_user_photos(candidate_id) or candidate_mongo.get("fotos", [])
         
         # Get shared interests names from Neo4j
         shared_interests = self.get_shared_interests(user_id, candidate_id)
@@ -311,9 +332,9 @@ class AppService:
             "edad": candidate_pg["edad"] if candidate_pg else 0,
             "genero": candidate_pg["genero"] if candidate_pg else "Desconocido",
             "ubicacion": candidate_pg["ubicacion"] if candidate_pg else "Desconocido",
-            "biografia": candidate_mongo.get("biografia", "") if candidate_mongo else "",
-            "fotos": candidate_mongo.get("fotos", []) if candidate_mongo else [],
-            "caracteristicas": candidate_mongo.get("caracteristicas", {}) if candidate_mongo else {},
+            "biografia": candidate_pg.get("biografia", "") if candidate_pg else "",
+            "fotos": candidate_photos,
+            "caracteristicas": candidate_mongo.get("caracteristicas", {}),
             "intereses_comunes": shared_interests
         }
 
@@ -365,14 +386,14 @@ class AppService:
         match_id = None
 
         if positive:
-            # 1b. Sincronizar Like en PostgreSQL
-            try:
-                self.pg_repo.create_like(user_from_id, user_to_id, tipo="like")
-            except Exception as e:
-                logger.warning(f"No se pudo sincronizar like en PostgreSQL: {e}")
+            # 1b. PostgreSQL confirma el like oficial del DER.
+            self.pg_repo.create_like(user_from_id, user_to_id, tipo="like")
 
-            # 2. Neo4j create like relation
-            self.neo4j_repo.create_like(user_from_id, user_to_id)
+            # 2. Neo4j proyecta la relación de grafo.
+            try:
+                self.neo4j_repo.create_like(user_from_id, user_to_id)
+            except Exception as e:
+                logger.warning(f"No se pudo proyectar el like en Neo4j: {e}. PostgreSQL queda como fuente de verdad.")
             
             # 3. Cassandra log swipe
             try:
@@ -380,8 +401,8 @@ class AppService:
             except Exception as e:
                 logger.warning(f"Advertencia: No se pudo registrar el swipe en Cassandra: {e}. La operación principal continuará.")
 
-            # 4. Check reciprocity
-            reciprocal = self.neo4j_repo.check_reciprocity(user_from_id, user_to_id)
+            # 4. Check reciprocity against PostgreSQL, the canonical DER store.
+            reciprocal = self.pg_repo.has_like(user_to_id, user_from_id)
             
             if reciprocal:
                 is_match = True
@@ -389,9 +410,7 @@ class AppService:
                 try:
                     match_id = self.pg_repo.create_match(user_from_id, user_to_id)
                 except Exception as e:
-                    logger.error(f"PostgreSQL match registration failed: {e}. Executing Neo4j rollback.")
-                    # Rollback Neo4j like
-                    self.neo4j_repo.delete_like(user_from_id, user_to_id)
+                    logger.error(f"PostgreSQL match registration failed: {e}.")
                     raise RuntimeError(f"No se pudo registrar el match en base relacional: {e}")
 
                 # 5b. Cassandra log match
@@ -406,7 +425,11 @@ class AppService:
                 except Exception as e:
                     logger.warning(f"Advertencia: No se pudieron actualizar las relaciones en Neo4j: {e}. Consistencia eventual asumida.")
 
-                # 5d. MongoDB notification
+                # 5d. PostgreSQL records the canonical DER notifications.
+                self.pg_repo.create_notification(user_from_id, "match", id_coincidencia=match_id)
+                self.pg_repo.create_notification(user_to_id, "match", id_coincidencia=match_id)
+
+                # 5e. MongoDB projects notification documents for UX.
                 try:
                     u_from = self.pg_repo.get_user_by_id(user_from_id)
                     u_to = self.pg_repo.get_user_by_id(user_to_id)
@@ -423,26 +446,18 @@ class AppService:
                         message=f"¡Tienes un nuevo match con {name_from}!",
                         notification_type="match"
                     )
-                    
-                    # 5e. Sincronizar notificación en PostgreSQL
-                    try:
-                        self.pg_repo.create_notification(user_from_id, "match", id_coincidencia=match_id)
-                        self.pg_repo.create_notification(user_to_id, "match", id_coincidencia=match_id)
-                    except Exception as e:
-                        logger.warning(f"No se pudo sincronizar notificaciones de match en PostgreSQL: {e}")
-                        
                 except Exception as e:
-                    logger.warning(f"Advertencia: No se pudieron crear las notificaciones en MongoDB: {e}. No se revierte el match.")
+                    logger.warning(f"Advertencia: No se pudieron proyectar las notificaciones en MongoDB: {e}.")
         else:
             # Dislike flow
-            # 1b. Sincronizar Dislike en PostgreSQL
-            try:
-                self.pg_repo.create_like(user_from_id, user_to_id, tipo="dislike")
-            except Exception as e:
-                logger.warning(f"No se pudo sincronizar dislike en PostgreSQL: {e}")
+            # 1b. PostgreSQL confirma el dislike oficial del DER.
+            self.pg_repo.create_like(user_from_id, user_to_id, tipo="dislike")
 
-            # 2. Neo4j create dislike relation (to exclude from search)
-            self.neo4j_repo.create_dislike(user_from_id, user_to_id)
+            # 2. Neo4j proyecta el descarte para recomendaciones.
+            try:
+                self.neo4j_repo.create_dislike(user_from_id, user_to_id)
+            except Exception as e:
+                logger.warning(f"No se pudo proyectar el dislike en Neo4j: {e}. PostgreSQL queda como fuente de verdad.")
             
             # 3. Cassandra log swipe
             try:
@@ -502,32 +517,27 @@ class AppService:
         # 4. PostgreSQL devuelve match_id (confirmado por la existencia de match_id e id de participante)
         receiver_id = current_match["user_id_2"] if current_match["user_id_1"] == sender_id else current_match["user_id_1"]
 
-        # 5. Cassandra guarda el mensaje
-        self.cassandra_repo.send_message(match_id, sender_id, texto)
-        
-        # 5b. Sincronizar mensaje en PostgreSQL
-        msg_id = None
-        try:
-            msg_id = self.pg_repo.create_message(match_id, sender_id, texto)
-        except Exception as e:
-            logger.warning(f"No se pudo sincronizar mensaje en PostgreSQL: {e}")
+        # 5. PostgreSQL guarda el mensaje oficial del DER.
+        msg_id = self.pg_repo.create_message(match_id, sender_id, texto)
 
-        # 6. MongoDB crea notificación para el receptor
+        # 6. PostgreSQL registra la notificación estructural.
+        notif_id = self.pg_repo.create_notification(receiver_id, "mensaje", id_mensaje=msg_id)
+
+        # 7. Cassandra proyecta el historial cronológico de conversación.
+        try:
+            self.cassandra_repo.send_message(match_id, sender_id, texto)
+        except Exception as e:
+            logger.warning(f"No se pudo proyectar el mensaje en Cassandra: {e}. PostgreSQL queda como fuente de verdad.")
+
+        # 8. MongoDB proyecta la notificación flexible para UX.
         try:
             sender_pg = self.pg_repo.get_user_by_id(sender_id)
             sender_name = sender_pg["nombre"] if sender_pg else "Alguien"
             snippet = texto[:30] + "..." if len(texto) > 30 else texto
             msg = f"Nuevo mensaje de {sender_name}: '{snippet}'"
             self.mongo_repo.create_notification(receiver_id, msg, "mensaje")
-            
-            # Sincronizar notificación en PostgreSQL
-            try:
-                self.pg_repo.create_notification(receiver_id, "mensaje", id_mensaje=msg_id)
-            except Exception as e:
-                logger.warning(f"No se pudo sincronizar notificación de mensaje en PostgreSQL: {e}")
-                
         except Exception as e:
-            logger.warning(f"Advertencia: No se pudo crear la notificación de mensaje en MongoDB: {e}. Se continúa.")
+            logger.warning(f"Advertencia: No se pudo proyectar la notificación {notif_id} en MongoDB: {e}.")
 
     def ver_conversacion(self, token, match_id):
         """
@@ -549,8 +559,23 @@ class AppService:
         if not current_match:
             raise PermissionError("El usuario no pertenece al match especificado o no existe en PostgreSQL.")
 
-        # 4. Cassandra consulta mensajes_por_conversacion por match_id (ordenados cronológicamente por clustering order)
-        msgs = self.cassandra_repo.get_messages(match_id)
+        # 4. Cassandra consulta la vista cronológica; PostgreSQL queda como fallback canónico.
+        try:
+            msgs = self.cassandra_repo.get_messages(match_id)
+        except Exception as e:
+            logger.warning(f"No se pudo leer la conversación desde Cassandra: {e}. Se usa PostgreSQL.")
+            msgs = []
+
+        if not msgs:
+            pg_msgs = self.pg_repo.get_messages_by_match(match_id)
+            msgs = [
+                {
+                    "timestamp": m["fecha_envio"],
+                    "sender_id": m["id_emisor"],
+                    "texto": m["contenido"]
+                }
+                for m in pg_msgs
+            ]
         
         # Combinar con nombres de usuarios para presentación en CLI
         u1_name = self.pg_repo.get_user_by_id(current_match["user_id_1"])["nombre"]
@@ -643,12 +668,13 @@ class AppService:
             self.neo4j_repo.create_event_node(event_id, titulo)
             self.neo4j_repo.create_organizer_relation(organizador_id, event_id)
         except Exception as e:
-            logger.error(f"Fallo en Neo4j al crear relaciones de evento: {e}. Aplicando compensación simple sobre PostgreSQL.")
-            # Compensación: eliminar evento de PostgreSQL
-            self.pg_repo.delete_event(event_id)
-            raise RuntimeError("Creación de evento fallida debido a error en base de grafos. Evento revertido en PostgreSQL.")
+            logger.warning(f"No se pudo proyectar el evento en Neo4j: {e}. PostgreSQL queda como fuente de verdad.")
 
-        # 7. MongoDB registra log y crea notificaciones
+        all_ids = self.pg_repo.get_all_user_ids_except(organizador_id)
+        for uid in all_ids:
+            self.pg_repo.create_notification(uid, "evento", id_evento=event_id)
+
+        # 7. MongoDB registra log y proyecta notificaciones
         try:
             self.mongo_repo.db.eventos_logs.insert_one({
                 "evento_id": event_id,
@@ -659,18 +685,11 @@ class AppService:
             })
             
             # Notificaciones en MongoDB (tolerancia a fallos)
-            all_ids = self.pg_repo.get_all_user_ids_except(organizador_id)
             for uid in all_ids:
                 self.mongo_repo.create_notification(uid, f"Nuevo evento disponible: '{titulo}'", "evento")
-                
-                # Sincronizar notificación en PostgreSQL
-                try:
-                    self.pg_repo.create_notification(uid, "evento", id_evento=event_id)
-                except Exception as e:
-                    logger.warning(f"No se pudo sincronizar notificación de evento en PostgreSQL: {e}")
                     
         except Exception as e:
-            logger.warning(f"Advertencia: No se pudo registrar el log/notificación en MongoDB: {e}. Se continúa.")
+            logger.warning(f"Advertencia: No se pudo proyectar el log/notificación en MongoDB: {e}.")
 
         return event_id
 
@@ -742,6 +761,7 @@ class AppService:
 
         # 4. PostgreSQL registra asistencia_eventos (la clave única/primaria de la tabla valida la no duplicación)
         self.pg_repo.register_attendance(user_id, event_id)
+        self.pg_repo.create_notification(organizador_id, "evento_asistencia", id_evento=event_id)
 
         # 5. Neo4j crea relación ASISTE_A (consistencia eventual con advertencia)
         try:
@@ -749,18 +769,11 @@ class AppService:
         except Exception as e:
             logger.warning(f"Advertencia: No se pudo registrar la relación de asistencia en Neo4j: {e}. Consistencia eventual asumida.")
 
-        # 6. MongoDB notifica al organizador (consistencia eventual)
+        # 6. MongoDB proyecta la notificación al organizador
         try:
             user_pg = self.pg_repo.get_user_by_id(user_id)
             user_name = user_pg["nombre"] if user_pg else "Alguien"
             msg = f"{user_name} se inscribió a tu evento: '{event['titulo']}'"
             self.mongo_repo.create_notification(organizador_id, msg, "evento_asistencia")
-            
-            # Sincronizar notificación en PostgreSQL
-            try:
-                self.pg_repo.create_notification(organizador_id, "evento_asistencia", id_evento=event_id)
-            except Exception as e:
-                logger.warning(f"No se pudo sincronizar notificación de inscripción a evento en PostgreSQL: {e}")
-                
         except Exception as e:
-            logger.warning(f"Advertencia: No se pudo crear la notificación de inscripción en MongoDB: {e}. Se continúa.")
+            logger.warning(f"Advertencia: No se pudo proyectar la notificación de inscripción en MongoDB: {e}.")
