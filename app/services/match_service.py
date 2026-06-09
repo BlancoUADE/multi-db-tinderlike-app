@@ -13,7 +13,7 @@ class MatchService:
         self.cassandra_repo = CassandraRepository()
         self.neo4j_repo = Neo4jRepository()
 
-    def dar_like(self, id_usuario_origen, id_usuario_destino):
+    def dar_like(self, id_usuario_origen, id_usuario_destino, fecha=None):
         """
         Gives a like. If mutual, generates a match (coincidencia).
         Synchronizes with Neo4j, Cassandra, Redis, and MongoDB.
@@ -29,23 +29,44 @@ class MatchService:
         if self.pg_repo.existe_like(id_usuario_origen, id_usuario_destino):
             raise ValueError("Ya le diste like a este usuario.")
 
+        # Parse or default date
+        if fecha is None:
+            today_date = date.today()
+            today_dt = datetime.now()
+        elif isinstance(fecha, datetime):
+            today_date = fecha.date()
+            today_dt = fecha
+        elif isinstance(fecha, date):
+            today_date = fecha
+            today_dt = datetime.combine(fecha, datetime.min.time())
+        else:
+            try:
+                today_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M")
+                today_date = today_dt.date()
+            except Exception:
+                try:
+                    today_dt = datetime.strptime(fecha, "%Y-%m-%d")
+                    today_date = today_dt.date()
+                except Exception:
+                    today_date = date.today()
+                    today_dt = datetime.now()
+
         # 1. Write to PostgreSQL (source of truth)
-        id_like = self.pg_repo.registrar_like(id_usuario_origen, id_usuario_destino)
+        id_like = self.pg_repo.registrar_like(id_usuario_origen, id_usuario_destino, fecha_like=today_dt)
         
         # Check if inverse like exists
         es_match = self.pg_repo.existe_like(id_usuario_destino, id_usuario_origen)
         id_coincidencia = None
-        
-        today = date.today()
-        today_str = today.strftime("%Y-%m-%d")
+                
+        today_str = today_date.strftime("%Y-%m-%d")
         
         if es_match:
             # Check if holiday
-            feriado = self.pg_repo.obtener_feriado(today)
-            fecha_feriado = today if feriado else None
+            feriado = self.pg_repo.obtener_feriado(today_date)
+            fecha_feriado = today_date if feriado else None
             
             # Create match in PostgreSQL
-            id_coincidencia = self.pg_repo.crear_coincidencia(id_usuario_origen, id_usuario_destino, fecha_feriado)
+            id_coincidencia = self.pg_repo.crear_coincidencia(id_usuario_origen, id_usuario_destino, fecha_feriado, fecha_coincidencia=today_dt)
         
         # --- SYNCHRONIZATION PHASE ---
         
@@ -59,12 +80,12 @@ class MatchService:
 
         # 3. Cassandra Sync
         try:
-            self.cassandra_repo.registrar_like_stats(today, id_usuario_destino)
+            self.cassandra_repo.registrar_like_stats(today_date, id_usuario_destino)
             if es_match:
                 # Check weekend
-                es_fin_de_semana = today.weekday() >= 5 # 5=Sat, 6=Sun
+                es_fin_de_semana = today_date.weekday() >= 5 # 5=Sat, 6=Sun
                 es_feriado = fecha_feriado is not None
-                self.cassandra_repo.registrar_coincidencia_stats(today, es_fin_de_semana, es_feriado)
+                self.cassandra_repo.registrar_coincidencia_stats(today_date, es_fin_de_semana, es_feriado)
         except Exception as e:
             print(f"[SYNC ERROR] Cassandra swipes/match metrics sync failed: {e}")
 
@@ -78,19 +99,20 @@ class MatchService:
         try:
             if es_match:
                 # Log match
-                self.mongo_repo.registrar_actividad(
-                    tipo_evento="MATCH_GENERADO",
-                    id_usuario=id_usuario_origen,
-                    detalles={"id_usuario_destino": id_usuario_destino, "id_coincidencia": id_coincidencia}
-                )
-                self.mongo_repo.registrar_actividad(
-                    tipo_evento="MATCH_GENERADO",
-                    id_usuario=id_usuario_destino,
-                    detalles={"id_usuario_destino": id_usuario_origen, "id_coincidencia": id_coincidencia}
-                )
+                self.mongo_repo.db.actividad_importante.insert_one({
+                    "tipo_evento": "MATCH_GENERADO",
+                    "id_usuario": id_usuario_origen,
+                    "fecha": today_dt,
+                    "detalles": {"id_usuario_destino": id_usuario_destino, "id_coincidencia": id_coincidencia}
+                })
+                self.mongo_repo.db.actividad_importante.insert_one({
+                    "tipo_evento": "MATCH_GENERADO",
+                    "id_usuario": id_usuario_destino,
+                    "fecha": today_dt,
+                    "detalles": {"id_usuario_destino": id_usuario_origen, "id_coincidencia": id_coincidencia}
+                })
                 
                 # Create match notification in Postgres for BOTH users
-                # We notify both because a match is mutual
                 notif_origen = self.pg_repo.crear_notificacion(id_usuario_origen, "COINCIDENCIA", id_coincidencia=id_coincidencia)
                 notif_destino = self.pg_repo.crear_notificacion(id_usuario_destino, "COINCIDENCIA", id_coincidencia=id_coincidencia)
                 
@@ -105,33 +127,32 @@ class MatchService:
                     "id_notificacion": notif_origen,
                     "tipo": "COINCIDENCIA",
                     "mensaje": f"¡Tuviste una coincidencia con {user_destino['nombre']}!",
-                    "fecha": datetime.now().isoformat()
+                    "fecha": today_dt.isoformat()
                 })
-                self.redis_repo.indigo = self.redis_repo.agregar_notificacion_pendiente(id_usuario_destino, {
+                self.redis_repo.agregar_notificacion_pendiente(id_usuario_destino, {
                     "id_notificacion": notif_destino,
                     "tipo": "COINCIDENCIA",
                     "mensaje": f"¡Tuviste una coincidencia con {user_origen['nombre']}!",
-                    "fecha": datetime.now().isoformat()
+                    "fecha": today_dt.isoformat()
                 })
             else:
                 # Log like
-                self.mongo_repo.registrar_actividad(
-                    tipo_evento="LIKE_REALIZADO",
-                    id_usuario=id_usuario_origen,
-                    detalles={"id_usuario_destino": id_usuario_destino}
-                )
+                self.mongo_repo.db.actividad_importante.insert_one({
+                    "tipo_evento": "LIKE_REALIZADO",
+                    "id_usuario": id_usuario_origen,
+                    "fecha": today_dt,
+                    "detalles": {"id_usuario_destino": id_usuario_destino}
+                })
                 
-                # Create like notification in Postgres for destination user
+                # Create like notification in Postgres
                 notif_id = self.pg_repo.crear_notificacion(id_usuario_destino, "LIKE", id_like=id_like)
                 
-                # Increment in Redis
                 self.redis_repo.incrementar_notificaciones_no_leidas(id_usuario_destino)
-                user_origen = self.pg_repo.obtener_usuario_por_id(id_usuario_origen)
                 self.redis_repo.agregar_notificacion_pendiente(id_usuario_destino, {
                     "id_notificacion": notif_id,
                     "tipo": "LIKE",
-                    "mensaje": f"A alguien le gustó tu perfil", # No mostrar nombre para mantener misterio de like o mostrar? "A alguien le gustó tu perfil" es estándar
-                    "fecha": datetime.now().isoformat()
+                    "mensaje": f"A alguien le gustó tu perfil",
+                    "fecha": today_dt.isoformat()
                 })
         except Exception as e:
             print(f"[SYNC ERROR] MongoDB/Redis activity logging failed: {e}")
@@ -144,7 +165,7 @@ class MatchService:
 
         return es_match, id_coincidencia
 
-    def enviar_mensaje(self, id_coincidencia, id_emisor, contenido):
+    def enviar_mensaje(self, id_coincidencia, id_emisor, contenido, fecha=None):
         """
         Sends a message inside a match. Validates blocks and match presence.
         """
@@ -160,8 +181,24 @@ class MatchService:
         if self.pg_repo.existe_bloqueo_activo(id_emisor, id_receptor):
             raise ValueError("No se pueden enviar mensajes porque existe un bloqueo activo.")
 
+        # Parse date
+        if fecha is None:
+            today_dt = datetime.now()
+        elif isinstance(fecha, datetime):
+            today_dt = fecha
+        elif isinstance(fecha, date):
+            today_dt = datetime.combine(fecha, datetime.min.time())
+        else:
+            try:
+                today_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M")
+            except Exception:
+                try:
+                    today_dt = datetime.strptime(fecha, "%Y-%m-%d")
+                except Exception:
+                    today_dt = datetime.now()
+
         # 1. Save message to PostgreSQL
-        id_mensaje = self.pg_repo.guardar_mensaje(id_coincidencia, id_emisor, contenido)
+        id_mensaje = self.pg_repo.guardar_mensaje(id_coincidencia, id_emisor, contenido, fecha_envio=today_dt)
         
         # 2. Create notification in PostgreSQL
         notif_id = self.pg_repo.crear_notificacion(id_receptor, "MENSAJE", id_mensaje=id_mensaje)
@@ -174,18 +211,19 @@ class MatchService:
                 "id_notificacion": notif_id,
                 "tipo": "MENSAJE",
                 "mensaje": f"Nuevo mensaje de {user_emisor['nombre']}: {contenido[:20]}...",
-                "fecha": datetime.now().isoformat()
+                "fecha": today_dt.isoformat()
             })
         except Exception as e:
             print(f"[SYNC ERROR] Redis message notification sync failed: {e}")
 
         # 4. MongoDB activity log
         try:
-            self.mongo_repo.registrar_actividad(
-                tipo_evento="MENSAJE_ENVIADO",
-                id_usuario=id_emisor,
-                detalles={"id_receptor": id_receptor, "id_mensaje": id_mensaje}
-            )
+            self.mongo_repo.db.actividad_importante.insert_one({
+                "tipo_evento": "MENSAJE_ENVIADO",
+                "id_usuario": id_emisor,
+                "fecha": today_dt,
+                "detalles": {"id_receptor": id_receptor, "id_mensaje": id_mensaje}
+            })
         except Exception as e:
             print(f"[SYNC ERROR] MongoDB activity logging failed: {e}")
 

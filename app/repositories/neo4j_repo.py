@@ -6,13 +6,14 @@ class Neo4jRepository:
         self.driver = get_neo4j_driver()
 
     def close(self):
-        self.driver.close()
+        # Connection is managed as a singleton in databases/neo4j_conn.py
+        pass
 
     # --- NODOS ---
     def crear_usuario_nodo(self, id_usuario, nombre, edad, genero, ubicacion):
         query = """
             MERGE (u:Usuario {id_usuario: $id_usuario})
-            SET u.nombre = $nombre, u.edad = $edad, u.genero = $genero, u.ubicacion = $ubicacion
+            SET u.id = $id_usuario, u.nombre = $nombre, u.edad = $edad, u.genero = $genero, u.ubicacion = $ubicacion
             RETURN u
         """
         with self.driver.session() as session:

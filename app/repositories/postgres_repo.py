@@ -33,14 +33,14 @@ class PostgresRepository:
     # --- USUARIOS ---
     def crear_usuario(self, user_data):
         query = """
-            INSERT INTO usuarios (nombre, edad, genero, ubicacion, biografia, pref_edad_min, pref_edad_max, email, password_hash)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO usuarios (nombre, edad, genero, ubicacion, biografia, pref_edad_min, pref_edad_max, email, password_hash, fecha_registro)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
             RETURNING id_usuario;
         """
         params = (
             user_data["nombre"], user_data["edad"], user_data["genero"], user_data["ubicacion"],
             user_data.get("biografia", ""), user_data["pref_edad_min"], user_data["pref_edad_max"],
-            user_data["email"], user_data["password_hash"]
+            user_data["email"], user_data["password_hash"], user_data.get("fecha_registro")
         )
         return self._execute(query, params, return_id=True)
 
@@ -122,13 +122,13 @@ class PostgresRepository:
         return self._execute(query, (id_usuario,), fetch_all=True)
 
     # --- LIKES ---
-    def registrar_like(self, id_usuario_origen, id_usuario_destino):
+    def registrar_like(self, id_usuario_origen, id_usuario_destino, fecha_like=None):
         query = """
-            INSERT INTO likes (id_usuario_origen, id_usuario_destino)
-            VALUES (%s, %s)
+            INSERT INTO likes (id_usuario_origen, id_usuario_destino, fecha_like)
+            VALUES (%s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
             RETURNING id_like;
         """
-        return self._execute(query, (id_usuario_origen, id_usuario_destino), return_id=True)
+        return self._execute(query, (id_usuario_origen, id_usuario_destino, fecha_like), return_id=True)
 
     def existe_like(self, id_usuario_origen, id_usuario_destino):
         res = self._execute("""
@@ -138,15 +138,15 @@ class PostgresRepository:
         return res is not None
 
     # --- COINCIDENCIAS (MATCHES) ---
-    def crear_coincidencia(self, id_usuario1, id_usuario2, fecha_feriado=None):
+    def crear_coincidencia(self, id_usuario1, id_usuario2, fecha_feriado=None, fecha_coincidencia=None):
         u1, u2 = min(id_usuario1, id_usuario2), max(id_usuario1, id_usuario2)
         query = """
-            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_feriado)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (id_usuario1, id_usuario2) DO UPDATE SET fecha_coincidencia = CURRENT_TIMESTAMP
+            INSERT INTO coincidencias (id_usuario1, id_usuario2, fecha_feriado, fecha_coincidencia)
+            VALUES (%s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
+            ON CONFLICT (id_usuario1, id_usuario2) DO UPDATE SET fecha_coincidencia = COALESCE(%s, CURRENT_TIMESTAMP)
             RETURNING id_coincidencia;
         """
-        return self._execute(query, (u1, u2, fecha_feriado), return_id=True)
+        return self._execute(query, (u1, u2, fecha_feriado, fecha_coincidencia, fecha_coincidencia), return_id=True)
 
     def obtener_coincidencia(self, id_usuario1, id_usuario2):
         u1, u2 = min(id_usuario1, id_usuario2), max(id_usuario1, id_usuario2)
@@ -172,13 +172,13 @@ class PostgresRepository:
         return self._execute(query, (id_usuario, id_usuario, id_usuario), fetch_all=True)
 
     # --- MENSAJES ---
-    def guardar_mensaje(self, id_coincidencia, id_emisor, contenido):
+    def guardar_mensaje(self, id_coincidencia, id_emisor, contenido, fecha_envio=None):
         query = """
-            INSERT INTO mensajes (id_coincidencia, id_emisor, contenido)
-            VALUES (%s, %s, %s)
+            INSERT INTO mensajes (id_coincidencia, id_emisor, contenido, fecha_envio)
+            VALUES (%s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
             RETURNING id_mensaje;
         """
-        return self._execute(query, (id_coincidencia, id_emisor, contenido), return_id=True)
+        return self._execute(query, (id_coincidencia, id_emisor, contenido, fecha_envio), return_id=True)
 
     def obtener_mensajes_conversacion(self, id_coincidencia):
         query = """
@@ -237,13 +237,13 @@ class PostgresRepository:
         return self._execute(query, (id_usuario,), fetch_all=True)
 
     # --- EVENTOS (CITAS) ---
-    def crear_evento(self, nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia):
+    def crear_evento(self, nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia, fecha_creacion=None):
         query = """
-            INSERT INTO eventos (nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia, estado)
-            VALUES (%s, %s, %s, %s, %s, 'PENDIENTE')
+            INSERT INTO eventos (nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia, estado, fecha_creacion)
+            VALUES (%s, %s, %s, %s, %s, 'PENDIENTE', COALESCE(%s, CURRENT_TIMESTAMP))
             RETURNING id_evento;
         """
-        return self._execute(query, (nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia), return_id=True)
+        return self._execute(query, (nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia, fecha_creacion), return_id=True)
 
     def existe_evento_pendiente(self, id_coincidencia):
         res = self._execute("""
@@ -258,13 +258,13 @@ class PostgresRepository:
     def actualizar_estado_evento(self, id_evento, estado):
         self._execute("UPDATE eventos SET estado = %s WHERE id_evento = %s", (estado, id_evento))
 
-    def registrar_asistencia_evento(self, id_usuario, id_evento, estado='PENDIENTE'):
+    def registrar_asistencia_evento(self, id_usuario, id_evento, estado='PENDIENTE', fecha_registro=None):
         query = """
-            INSERT INTO asistencia_eventos (id_usuario, id_evento, estado)
-            VALUES (%s, %s, %s)
+            INSERT INTO asistencia_eventos (id_usuario, id_evento, estado, fecha_registro)
+            VALUES (%s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
             RETURNING id_asistencia;
         """
-        return self._execute(query, (id_usuario, id_evento, estado), return_id=True)
+        return self._execute(query, (id_usuario, id_evento, estado, fecha_registro), return_id=True)
 
     def obtener_asistencia_evento_por_evento(self, id_evento):
         return self._execute("SELECT * FROM asistencia_eventos WHERE id_evento = %s", (id_evento,), fetch_one=True)
@@ -357,3 +357,9 @@ class PostgresRepository:
             VALUES (%s, %s)
             ON CONFLICT (fecha) DO UPDATE SET descripcion = %s
         """, (fecha, descripcion, descripcion))
+
+    # --- MENSAJES EXTRA ---
+    def obtener_conteo_mensajes_antes_de(self, id_coincidencia, fecha_limite):
+        query = "SELECT COUNT(*) AS total FROM mensajes WHERE id_coincidencia = %s AND fecha_envio <= %s"
+        res = self._execute(query, (id_coincidencia, fecha_limite), fetch_one=True)
+        return res["total"] if res else 0

@@ -65,14 +65,14 @@ class ReportService:
             "top_historico": top_historico
         }
 
-    # --- REPORTE 4: Duración promedio de conversaciones antes de una cita (Cassandra) ---
+    # --- REPORTE 4: Cantidad promedio de mensajes antes de una cita (Cassandra) ---
     def reporte_duracion_promedio_conversacion_cita(self):
-        duraciones = self.cassandra_repo.obtener_todas_duraciones()
-        if not duraciones:
+        stats = self.cassandra_repo.obtener_todas_duraciones()
+        if not stats:
             return 0.0, 0
-        total_horas = sum(row.duracion_hours for row in duraciones)
-        cantidad_citas = len(duraciones)
-        promedio = total_horas / cantidad_citas if cantidad_citas > 0 else 0.0
+        total_mensajes = sum(row.cantidad_mensajes for row in stats)
+        cantidad_citas = len(stats)
+        promedio = total_mensajes / cantidad_citas if cantidad_citas > 0 else 0.0
         return promedio, cantidad_citas
 
     # --- REPORTE 5: Intereses más comunes entre usuarios que coinciden (Neo4j) ---

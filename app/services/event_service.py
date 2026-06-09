@@ -13,7 +13,7 @@ class EventService:
         self.redis_repo = RedisRepository()
         self.cassandra_repo = CassandraRepository()
 
-    def proponer_cita(self, id_organizador, id_coincidencia, nombre_evento, fecha, ubicacion):
+    def proponer_cita(self, id_organizador, id_coincidencia, nombre_evento, fecha, ubicacion, fecha_creacion=None):
         """
         Creates a proposed event (cita) in Postgres, maps relationships in Neo4j, 
         logs in Mongo, and notifies the invitee in Redis.
@@ -33,8 +33,22 @@ class EventService:
         if self.pg_repo.existe_bloqueo_activo(id_organizador, id_receptor):
             raise ValueError("No se puede proponer una cita porque existe un bloqueo activo.")
         
-        # Validate date is future
-        if fecha <= datetime.now():
+        # Parse dates
+        if fecha_creacion is None:
+            fecha_creacion_dt = datetime.now()
+        elif isinstance(fecha_creacion, datetime):
+            fecha_creacion_dt = fecha_creacion
+        else:
+            try:
+                fecha_creacion_dt = datetime.strptime(fecha_creacion, "%Y-%m-%d %H:%M")
+            except Exception:
+                try:
+                    fecha_creacion_dt = datetime.strptime(fecha_creacion, "%Y-%m-%d")
+                except Exception:
+                    fecha_creacion_dt = datetime.now()
+
+        # Validate date is future compared to creation date
+        if fecha <= fecha_creacion_dt:
             raise ValueError("La cita debe ser futura al momento de crearla.")
         
         # Validate no pending event already between the two users
@@ -42,8 +56,8 @@ class EventService:
             raise ValueError("Ya existe una propuesta de cita pendiente en esta coincidencia.")
 
         # 1. Write to PostgreSQL (source of truth)
-        id_evento = self.pg_repo.crear_evento(nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia)
-        self.pg_repo.registrar_asistencia_evento(id_receptor, id_evento, estado='PENDIENTE')
+        id_evento = self.pg_repo.crear_evento(nombre_evento, fecha, ubicacion, id_organizador, id_coincidencia, fecha_creacion=fecha_creacion_dt)
+        self.pg_repo.registrar_asistencia_evento(id_receptor, id_evento, estado='PENDIENTE', fecha_registro=fecha_creacion_dt)
 
         # 2. Sync Neo4j Graph
         try:
@@ -64,24 +78,32 @@ class EventService:
                 "id_notificacion": notif_id,
                 "tipo": "EVENTO",
                 "mensaje": f"{user_organizador['nombre']} te propuso una cita: {nombre_evento}",
-                "fecha": datetime.now().isoformat()
+                "fecha": fecha_creacion_dt.isoformat()
             })
         except Exception as e:
             print(f"[SYNC ERROR] Redis event notification sync failed: {e}")
 
         # 5. MongoDB log
         try:
-            self.mongo_repo.registrar_actividad(
-                tipo_evento="EVENTO_PROPUESTO",
-                id_usuario=id_organizador,
-                detalles={"id_receptor": id_receptor, "id_evento": id_evento}
-            )
+            self.mongo_repo.db.actividad_importante.insert_one({
+                "tipo_evento": "EVENTO_PROPUESTO",
+                "id_usuario": id_organizador,
+                "fecha": fecha_creacion_dt,
+                "detalles": {"id_receptor": id_receptor, "id_evento": id_evento}
+            })
         except Exception as e:
             print(f"[SYNC ERROR] MongoDB logging for proposed event failed: {e}")
 
+        # 6. Update Cassandra messages-before-event metric
+        try:
+            cnt_mensajes = self.pg_repo.obtener_conteo_mensajes_antes_de(id_coincidencia, fecha_creacion_dt)
+            self.cassandra_repo.registrar_mensajes_antes_de_evento(id_evento, id_coincidencia, cnt_mensajes)
+        except Exception as e:
+            print(f"[SYNC ERROR] Cassandra message count metrics sync failed: {e}")
+
         return id_evento
 
-    def aceptar_cita(self, id_receptor, id_evento):
+    def aceptar_cita(self, id_receptor, id_evento, fecha_respuesta=None):
         """
         Accepts a proposed event.
         Updates Postgres, Neo4j graph, Mongo log, and calculates duration metrics in Cassandra.
@@ -96,7 +118,19 @@ class EventService:
         id_organizador = evento["id_organizador"]
         id_coincidencia = evento["id_coincidencia"]
         
-        now = datetime.now()
+        # Parse date
+        if fecha_respuesta is None:
+            now = datetime.now()
+        elif isinstance(fecha_respuesta, datetime):
+            now = fecha_respuesta
+        else:
+            try:
+                now = datetime.strptime(fecha_respuesta, "%Y-%m-%d %H:%M")
+            except Exception:
+                try:
+                    now = datetime.strptime(fecha_respuesta, "%Y-%m-%d")
+                except Exception:
+                    now = datetime.now()
 
         # 1. Update in PostgreSQL
         self.pg_repo.actualizar_estado_evento(id_evento, 'ACEPTADA')
@@ -108,27 +142,7 @@ class EventService:
         except Exception as e:
             print(f"[SYNC ERROR] Neo4j event acceptance failed: {e}")
 
-        # 3. Update Cassandra duration metrics
-        try:
-            # Get first message date
-            first_msg = self.pg_repo.obtener_primer_mensaje(id_coincidencia)
-            if first_msg:
-                fecha_primer_mensaje = first_msg["fecha_envio"]
-            else:
-                # Fallback to match date if no messages have been sent yet
-                coincidencia = self.pg_repo.obtener_coincidencia_por_id(id_coincidencia)
-                fecha_primer_mensaje = coincidencia["fecha_coincidencia"]
-            
-            self.cassandra_repo.registrar_duracion_conversacion_evento(
-                id_evento=id_evento,
-                id_coincidencia=id_coincidencia,
-                fecha_primer_mensaje=fecha_primer_mensaje,
-                fecha_evento_aceptado=now
-            )
-        except Exception as e:
-            print(f"[SYNC ERROR] Cassandra duration metric sync failed: {e}")
-
-        # 4. Create Notification in Postgres for Organizer
+        # 3. Create Notification in Postgres for Organizer
         notif_id = self.pg_repo.crear_notificacion(id_organizador, "EVENTO", id_evento=id_evento)
 
         # 5. Redis notify
@@ -139,22 +153,23 @@ class EventService:
                 "id_notificacion": notif_id,
                 "tipo": "EVENTO",
                 "mensaje": f"{user_receptor['nombre']} aceptó tu cita: {evento['nombre_evento']}",
-                "fecha": datetime.now().isoformat()
+                "fecha": now.isoformat()
             })
         except Exception as e:
             print(f"[SYNC ERROR] Redis event notification sync failed: {e}")
 
         # 6. MongoDB log
         try:
-            self.mongo_repo.registrar_actividad(
-                tipo_evento="EVENTO_ACEPTADO",
-                id_usuario=id_receptor,
-                detalles={"id_organizador": id_organizador, "id_evento": id_evento}
-            )
+            self.mongo_repo.db.actividad_importante.insert_one({
+                "tipo_evento": "EVENTO_ACEPTADO",
+                "id_usuario": id_receptor,
+                "fecha": now,
+                "detalles": {"id_organizador": id_organizador, "id_evento": id_evento}
+            })
         except Exception as e:
             print(f"[SYNC ERROR] MongoDB logging for accepted event failed: {e}")
 
-    def rechazar_cita(self, id_receptor, id_evento):
+    def rechazar_cita(self, id_receptor, id_evento, fecha_respuesta=None):
         """
         Rejects a proposed event. Updates Postgres, Mongo logs, and notifies organizer.
         """
@@ -167,7 +182,19 @@ class EventService:
         evento = self.pg_repo.obtener_evento_por_id(id_evento)
         id_organizador = evento["id_organizador"]
 
-        now = datetime.now()
+        # Parse date
+        if fecha_respuesta is None:
+            now = datetime.now()
+        elif isinstance(fecha_respuesta, datetime):
+            now = fecha_respuesta
+        else:
+            try:
+                now = datetime.strptime(fecha_respuesta, "%Y-%m-%d %H:%M")
+            except Exception:
+                try:
+                    now = datetime.strptime(fecha_respuesta, "%Y-%m-%d")
+                except Exception:
+                    now = datetime.now()
 
         # 1. Update in PostgreSQL
         self.pg_repo.actualizar_estado_evento(id_evento, 'RECHAZADA')
@@ -184,18 +211,19 @@ class EventService:
                 "id_notificacion": notif_id,
                 "tipo": "EVENTO",
                 "mensaje": f"{user_receptor['nombre']} rechazó tu cita: {evento['nombre_evento']}",
-                "fecha": datetime.now().isoformat()
+                "fecha": now.isoformat()
             })
         except Exception as e:
             print(f"[SYNC ERROR] Redis event notification sync failed: {e}")
 
         # 4. MongoDB log
         try:
-            self.mongo_repo.registrar_actividad(
-                tipo_evento="EVENTO_RECHAZADO",
-                id_usuario=id_receptor,
-                detalles={"id_organizador": id_organizador, "id_evento": id_evento}
-            )
+            self.mongo_repo.db.actividad_importante.insert_one({
+                "tipo_evento": "EVENTO_RECHAZADO",
+                "id_usuario": id_receptor,
+                "fecha": now,
+                "detalles": {"id_organizador": id_organizador, "id_evento": id_evento}
+            })
         except Exception as e:
             print(f"[SYNC ERROR] MongoDB logging failed: {e}")
 

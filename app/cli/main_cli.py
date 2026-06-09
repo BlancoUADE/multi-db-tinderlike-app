@@ -80,7 +80,7 @@ class TinderCLI:
             email = input("Email: ").strip().lower()
             if not email or "@" not in email: raise ValueError("Email inválido.")
             
-            password = input("Contraseña: ").strip()
+            password = input("Contraseña (Debe tener al menos 6 caracteres): ").strip()
             if len(password) < 6: raise ValueError("La contraseña debe tener al menos 6 caracteres.")
             
             # Additional photos / interests during registration
@@ -97,7 +97,8 @@ class TinderCLI:
                 "pref_edad_min": pref_edad_min,
                 "pref_edad_max": pref_edad_max,
                 "email": email,
-                "password": password
+                "password": password,
+                "fecha_registro": datetime.now()
             }
             
             id_usuario = self.auth_service.registrar_usuario(user_data)
@@ -648,8 +649,9 @@ class TinderCLI:
             self.print_header("Bloqueos de Usuarios")
             options = {
                 "1": "Ver usuarios bloqueados",
-                "2": "Desbloquear usuario",
-                "3": "Volver"
+                "2": "Bloquear usuario",
+                "3": "Desbloquear usuario",
+                "4": "Volver"
             }
             self.print_menu_options(options)
             choice = input("Seleccione una opción: ").strip()
@@ -665,6 +667,15 @@ class TinderCLI:
                 input("\nPresione ENTER para continuar...")
                 
             elif choice == "2":
+                tid = input("Ingrese el ID del usuario a bloquear: ").strip()
+                if tid:
+                    try:
+                        self.block_service.bloquear_usuario(uid, int(tid))
+                        print("\n¡Usuario bloqueado con éxito!")
+                    except Exception as e:
+                        print(f"\n[ERROR] {e}")
+
+            elif choice == "3":
                 tid = input("Ingrese el ID del usuario a desbloquear: ").strip()
                 if tid:
                     try:
@@ -672,7 +683,7 @@ class TinderCLI:
                         print("\n¡Usuario desbloqueado con éxito!")
                     except Exception as e:
                         print(f"\n[ERROR] {e}")
-            elif choice == "3":
+            elif choice == "4":
                 break
 
     # --- NOTIFICACIONES ---
@@ -728,7 +739,7 @@ class TinderCLI:
                 "1": "Promedio de coincidencias por día (Cassandra)",
                 "2": "Atributos más populares en perfiles (MongoDB)",
                 "3": "Perfiles con más swipes a la derecha (Redis/Cassandra)",
-                "4": "Duración promedio antes de una cita (Cassandra)",
+                "4": "Cantidad promedio de mensajes antes de una cita (Cassandra)",
                 "5": "Intereses más comunes en coincidencias (Neo4j)",
                 "6": "Perfiles +10 fotos y +3 intereses en común (MongoDB/Neo4j)",
                 "7": "Coincidencias en fin de semana / feriados (Cassandra)",
@@ -781,9 +792,9 @@ class TinderCLI:
                     
                 elif choice == "4":
                     avg, total = self.report_service.reporte_duracion_promedio_conversacion_cita()
-                    print(f"\n--- Duración Promedio Conversación a Cita ---")
-                    print(f" Citas sociales aceptadas analizadas: {total}")
-                    print(f" Duración promedio: {avg:.2f} horas (desde el 1er mensaje o match hasta aceptación).")
+                    print(f"\n--- Cantidad Promedio de Mensajes antes de una Cita ---")
+                    print(f" Citas propuestas analizadas: {total}")
+                    print(f" Cantidad promedio de mensajes: {avg:.2f} mensajes.")
                     input("\nPresione ENTER para volver...")
                     
                 elif choice == "5":

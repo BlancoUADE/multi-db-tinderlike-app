@@ -199,9 +199,21 @@ def migrate_cassandra():
     print("Migrando Cassandra...")
     cluster, session = get_cassandra_session()
     
-    # 1. match_stats_by_day
+    # Drop old tables if they exist to clean keyspace
+    session.execute("DROP TABLE IF EXISTS match_stats_by_day;")
+    session.execute("DROP TABLE IF EXISTS profile_swipes_by_day;")
+    session.execute("DROP TABLE IF EXISTS profile_swipes_total;")
+    session.execute("DROP TABLE IF EXISTS conversation_to_event_duration;")
+    
+    # Drop Spanish tables if they exist for clean rebuild
+    session.execute("DROP TABLE IF EXISTS estadisticas_coincidencias_por_dia;")
+    session.execute("DROP TABLE IF EXISTS swipes_perfil_por_dia;")
+    session.execute("DROP TABLE IF EXISTS swipes_perfil_total;")
+    session.execute("DROP TABLE IF EXISTS duracion_conversacion_a_evento;")
+    
+    # 1. estadisticas_coincidencias_por_dia
     session.execute("""
-        CREATE TABLE IF NOT EXISTS match_stats_by_day (
+        CREATE TABLE IF NOT EXISTS estadisticas_coincidencias_por_dia (
             fecha date PRIMARY KEY,
             cantidad_coincidencias int,
             cantidad_fin_de_semana int,
@@ -209,9 +221,9 @@ def migrate_cassandra():
         )
     """)
     
-    # 2. profile_swipes_by_day
+    # 2. swipes_perfil_por_dia
     session.execute("""
-        CREATE TABLE IF NOT EXISTS profile_swipes_by_day (
+        CREATE TABLE IF NOT EXISTS swipes_perfil_por_dia (
             fecha date,
             id_usuario_destino int,
             cantidad_likes int,
@@ -219,22 +231,20 @@ def migrate_cassandra():
         )
     """)
     
-    # 3. profile_swipes_total
+    # 3. swipes_perfil_total
     session.execute("""
-        CREATE TABLE IF NOT EXISTS profile_swipes_total (
+        CREATE TABLE IF NOT EXISTS swipes_perfil_total (
             id_usuario_destino int PRIMARY KEY,
             cantidad_likes_total int
         )
     """)
     
-    # 4. conversation_to_event_duration
+    # 4. duracion_conversacion_a_evento
     session.execute("""
-        CREATE TABLE IF NOT EXISTS conversation_to_event_duration (
+        CREATE TABLE IF NOT EXISTS duracion_conversacion_a_evento (
             id_evento int PRIMARY KEY,
             id_coincidencia int,
-            fecha_primer_mensaje timestamp,
-            fecha_evento_aceptado timestamp,
-            duracion_horas double
+            cantidad_mensajes int
         )
     """)
     
