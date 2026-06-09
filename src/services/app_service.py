@@ -214,6 +214,15 @@ class AppService:
         except Exception as e:
             # Registrar warning y continuar asumiendo consistencia eventual
             logger.warning(f"No se pudieron actualizar los intereses en Neo4j: {e}. Consistencia eventual asumida.")
+            
+        # 4. PostgreSQL: Sincronizar campos principales de perfil e intereses
+        try:
+            pref_edad_min = preferencias.get('edad_min', 18)
+            pref_edad_max = preferencias.get('edad_max', 99)
+            self.pg_repo.update_user_profile_fields(user_id, biografia, pref_edad_min, pref_edad_max)
+            self.pg_repo.update_user_interests(user_id, intereses)
+        except Exception as e:
+            logger.warning(f"No se pudo sincronizar perfil/intereses en PostgreSQL: {e}.")
 
     def add_user_photo(self, token, photo_url):
         """
@@ -226,6 +235,12 @@ class AppService:
             raise PermissionError("Sesión inválida o expirada.")
         
         self.mongo_repo.add_photo(user_id, photo_url)
+        
+        # Sincronizar foto en PostgreSQL
+        try:
+            self.pg_repo.add_photo(user_id, photo_url)
+        except Exception as e:
+            logger.warning(f"No se pudo sincronizar foto en PostgreSQL: {e}")
 
     def get_next_candidate(self, token):
         """
@@ -350,6 +365,12 @@ class AppService:
         match_id = None
 
         if positive:
+            # 1b. Sincronizar Like en PostgreSQL
+            try:
+                self.pg_repo.create_like(user_from_id, user_to_id, tipo="like")
+            except Exception as e:
+                logger.warning(f"No se pudo sincronizar like en PostgreSQL: {e}")
+
             # 2. Neo4j create like relation
             self.neo4j_repo.create_like(user_from_id, user_to_id)
             
@@ -402,10 +423,24 @@ class AppService:
                         message=f"¡Tienes un nuevo match con {name_from}!",
                         notification_type="match"
                     )
+                    
+                    # 5e. Sincronizar notificación en PostgreSQL
+                    try:
+                        self.pg_repo.create_notification(user_from_id, "match", id_coincidencia=match_id)
+                        self.pg_repo.create_notification(user_to_id, "match", id_coincidencia=match_id)
+                    except Exception as e:
+                        logger.warning(f"No se pudo sincronizar notificaciones de match en PostgreSQL: {e}")
+                        
                 except Exception as e:
                     logger.warning(f"Advertencia: No se pudieron crear las notificaciones en MongoDB: {e}. No se revierte el match.")
         else:
             # Dislike flow
+            # 1b. Sincronizar Dislike en PostgreSQL
+            try:
+                self.pg_repo.create_like(user_from_id, user_to_id, tipo="dislike")
+            except Exception as e:
+                logger.warning(f"No se pudo sincronizar dislike en PostgreSQL: {e}")
+
             # 2. Neo4j create dislike relation (to exclude from search)
             self.neo4j_repo.create_dislike(user_from_id, user_to_id)
             
@@ -469,6 +504,13 @@ class AppService:
 
         # 5. Cassandra guarda el mensaje
         self.cassandra_repo.send_message(match_id, sender_id, texto)
+        
+        # 5b. Sincronizar mensaje en PostgreSQL
+        msg_id = None
+        try:
+            msg_id = self.pg_repo.create_message(match_id, sender_id, texto)
+        except Exception as e:
+            logger.warning(f"No se pudo sincronizar mensaje en PostgreSQL: {e}")
 
         # 6. MongoDB crea notificación para el receptor
         try:
@@ -477,6 +519,13 @@ class AppService:
             snippet = texto[:30] + "..." if len(texto) > 30 else texto
             msg = f"Nuevo mensaje de {sender_name}: '{snippet}'"
             self.mongo_repo.create_notification(receiver_id, msg, "mensaje")
+            
+            # Sincronizar notificación en PostgreSQL
+            try:
+                self.pg_repo.create_notification(receiver_id, "mensaje", id_mensaje=msg_id)
+            except Exception as e:
+                logger.warning(f"No se pudo sincronizar notificación de mensaje en PostgreSQL: {e}")
+                
         except Exception as e:
             logger.warning(f"Advertencia: No se pudo crear la notificación de mensaje en MongoDB: {e}. Se continúa.")
 
@@ -613,6 +662,13 @@ class AppService:
             all_ids = self.pg_repo.get_all_user_ids_except(organizador_id)
             for uid in all_ids:
                 self.mongo_repo.create_notification(uid, f"Nuevo evento disponible: '{titulo}'", "evento")
+                
+                # Sincronizar notificación en PostgreSQL
+                try:
+                    self.pg_repo.create_notification(uid, "evento", id_evento=event_id)
+                except Exception as e:
+                    logger.warning(f"No se pudo sincronizar notificación de evento en PostgreSQL: {e}")
+                    
         except Exception as e:
             logger.warning(f"Advertencia: No se pudo registrar el log/notificación en MongoDB: {e}. Se continúa.")
 
@@ -699,5 +755,12 @@ class AppService:
             user_name = user_pg["nombre"] if user_pg else "Alguien"
             msg = f"{user_name} se inscribió a tu evento: '{event['titulo']}'"
             self.mongo_repo.create_notification(organizador_id, msg, "evento_asistencia")
+            
+            # Sincronizar notificación en PostgreSQL
+            try:
+                self.pg_repo.create_notification(organizador_id, "evento_asistencia", id_evento=event_id)
+            except Exception as e:
+                logger.warning(f"No se pudo sincronizar notificación de inscripción a evento en PostgreSQL: {e}")
+                
         except Exception as e:
             logger.warning(f"Advertencia: No se pudo crear la notificación de inscripción en MongoDB: {e}. Se continúa.")

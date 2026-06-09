@@ -23,28 +23,12 @@ Es una **aplicación de consola (CLI)** que simula Tinder. Permite:
 
 ## 2. Las 5 Bases de Datos y Su Rol
 
-```mermaid
-graph TB
-    APP["🐍 Python App<br/>(AppService)"]
-    
-    PG["🐘 PostgreSQL 16<br/>Relacional - SQL"]
-    MG["🍃 MongoDB 7<br/>Documental - BSON"]
-    RD["⚡ Redis 7<br/>Clave-Valor - RAM"]
-    CS["📊 Cassandra 4.1<br/>Columnar - Wide Column"]
-    N4["🔗 Neo4j 5<br/>Grafos - Property Graph"]
-    
-    APP --> PG
-    APP --> MG
-    APP --> RD
-    APP --> CS
-    APP --> N4
-    
-    PG --- PG_DESC["Identidades, Matches oficiales,<br/>Eventos, Auditoría de bloqueos"]
-    MG --- MG_DESC["Perfiles flexibles, Fotos,<br/>Logs, Notificaciones"]
-    RD --- RD_DESC["Sesiones activas (TTL),<br/>Caché de candidatos"]
-    CS --- CS_DESC["Swipes históricos, Matches por día,<br/>Mensajes de chat"]
-    N4 --- N4_DESC["Likes, Matches sociales, Bloqueos,<br/>Intereses, Eventos (grafo)"]
-```
+* **Aplicación Central (Python App)**: Se conecta directamente con las 5 bases de datos de forma paralela.
+* **PostgreSQL (Relacional)**: Identidades, Matches oficiales, Eventos y Auditoría de bloqueos.
+* **MongoDB (Documental)**: Perfiles flexibles, Fotos, Logs y Notificaciones.
+* **Redis (Clave-Valor)**: Sesiones activas (TTL) y Caché de candidatos.
+* **Cassandra (Columnar)**: Swipes históricos, Matches por día y Mensajes de chat.
+* **Neo4j (Grafos)**: Likes, Matches sociales, Bloqueos, Intereses y Grafos de Eventos.
 
 ### Detalle de cada base:
 
@@ -60,44 +44,15 @@ graph TB
 
 ## 3. Arquitectura de Capas del Código
 
-```mermaid
-graph TD
-    subgraph "Capa de Presentación"
-        CLI["src/cli/menu.py<br/>TinderCLI"]
-    end
-    
-    subgraph "Capa de Servicio (Orquestador)"
-        SVC["src/services/app_service.py<br/>AppService"]
-        RPT["src/analytics/reports.py<br/>ReportService"]
-    end
-    
-    subgraph "Capa de Repositorios (Acceso a Datos)"
-        PG_R["postgres_repo.py"]
-        MG_R["mongo_repo.py"]
-        RD_R["redis_repo.py"]
-        N4_R["neo4j_repo.py"]
-        CS_R["cassandra_repo.py"]
-    end
-    
-    subgraph "Capa de Conexión"
-        CONN["src/database/connection.py"]
-        INIT["src/database/initialize.py"]
-    end
-    
-    CLI --> SVC
-    CLI --> RPT
-    SVC --> PG_R
-    SVC --> MG_R
-    SVC --> RD_R
-    SVC --> N4_R
-    SVC --> CS_R
-    RPT --> CONN
-    PG_R --> CONN
-    MG_R --> CONN
-    RD_R --> CONN
-    N4_R --> CONN
-    CS_R --> CONN
-```
+* **Capa de Presentación**:
+  * `src/cli/menu.py` (TinderCLI) interactúa con el usuario.
+* **Capa de Servicio (Orquestador)**:
+  * `src/services/app_service.py` (AppService)
+  * `src/analytics/reports.py` (ReportService)
+* **Capa de Repositorios (Acceso a Datos)**:
+  * Repositorios individuales: `postgres_repo.py`, `mongo_repo.py`, `redis_repo.py`, `neo4j_repo.py`, `cassandra_repo.py`.
+* **Capa de Conexión**:
+  * `src/database/connection.py` y `src/database/initialize.py`.
 
 ### Archivos clave:
 
@@ -123,26 +78,15 @@ Estos son los flujos que tenés que saber explicar. Cada uno muestra cómo inter
 
 ### 🔵 Flujo A: Registro de Usuario
 
-```mermaid
-sequenceDiagram
-    participant CLI as CLI (Usuario)
-    participant SVC as AppService
-    participant PG as PostgreSQL
-    participant MG as MongoDB
-    participant N4 as Neo4j
-    
-    CLI->>SVC: register_user(nombre, email, ...)
-    SVC->>PG: get_user_by_email(email)
-    PG-->>SVC: null (no existe)
-    SVC->>PG: INSERT INTO users → user_id
-    PG-->>SVC: user_id = 5
-    SVC->>MG: create_profile(user_id=5)
-    Note over MG: Crea doc en "perfiles" con<br/>fotos=[], bio="", prefs={}
-    MG-->>SVC: OK
-    SVC->>N4: MERGE (u:Usuario {id: 5})
-    N4-->>SVC: OK
-    SVC-->>CLI: ✅ Registrado con ID 5
-```
+**Pasos del flujo:**
+1. **Usuario (CLI)** envía datos de registro a la App.
+2. **App** consulta a PostgreSQL si el email existe.
+3. **PostgreSQL** lo crea y devuelve un nuevo `user_id`.
+4. **App** pide a MongoDB crear el documento de perfil.
+5. **MongoDB** crea el documento vacío de perfil y fotos.
+6. **App** pide a Neo4j crear el nodo del Usuario.
+7. **Neo4j** confirma creación.
+8. **App** avisa al usuario que el registro fue exitoso.
 
 > **Rollback manual**: Si MongoDB falla → se borra el user de PostgreSQL. Si Neo4j falla → se borra el perfil de Mongo Y el user de Postgres. Esto es **compensación manual** (no hay transacciones distribuidas ACID).
 
@@ -152,25 +96,15 @@ sequenceDiagram
 
 ### 🔵 Flujo B: Login
 
-```mermaid
-sequenceDiagram
-    participant CLI as CLI
-    participant SVC as AppService
-    participant PG as PostgreSQL
-    participant MG as MongoDB
-    participant RD as Redis
-    
-    CLI->>SVC: login_user(email, password)
-    SVC->>PG: SELECT * FROM users WHERE email=?
-    PG-->>SVC: {id:5, password_hash:...}
-    SVC->>SVC: Verifica hash SHA-256
-    SVC->>MG: log_login_attempt(éxito=true)
-    Note over MG: Inserta en "historial_login"
-    SVC->>RD: SET session:{uuid} → 5 (TTL 3600s)
-    SVC->>RD: SADD users:online 5
-    RD-->>SVC: OK
-    SVC-->>CLI: ✅ Token de sesión
-```
+**Pasos del flujo:**
+1. **Usuario (CLI)** envía credenciales (email y password).
+2. **App** consulta a PostgreSQL buscando al usuario.
+3. **PostgreSQL** devuelve el hash de la contraseña.
+4. **App** verifica el hash localmente.
+5. **App** envía a MongoDB el registro (log) de intento de login.
+6. **App** crea un Token y lo guarda en Redis con un TTL (tiempo de vida) de 1 hora.
+7. **App** agrega el ID del usuario al SET de usuarios online en Redis.
+8. **App** devuelve el Token al usuario.
 
 > **Tolerancia**: Si MongoDB falla al loguear el intento exitoso, se emite un warning pero el login continúa. Redis es obligatorio (sin sesión no hay app).
 
@@ -180,41 +114,17 @@ sequenceDiagram
 
 ### 🔵 Flujo C: Búsqueda de Candidatos (con caché)
 
-```mermaid
-sequenceDiagram
-    participant CLI as CLI
-    participant SVC as AppService
-    participant RD as Redis
-    participant MG as MongoDB
-    participant N4 as Neo4j
-    participant PG as PostgreSQL
-    
-    CLI->>SVC: get_next_candidate(token)
-    SVC->>RD: Validar sesión (GET session:{token})
-    RD-->>SVC: user_id = 5
-    SVC->>RD: LLEN candidates:5
-    RD-->>SVC: 0 (cache miss)
-    
-    Note over SVC: Cache Miss → Generar lista
-    SVC->>MG: get_profile(5) → preferencias
-    MG-->>SVC: {edad_min:20, edad_max:35, genero:"Femenino"}
-    SVC->>N4: get_excluded_user_ids(5)
-    Note over N4: Usuarios ya likeados, descartados,<br/>bloqueados, con match
-    N4-->>SVC: {3, 7, 12}
-    SVC->>PG: SELECT id FROM users WHERE edad BETWEEN 20 AND 35 AND genero='Femenino' AND id NOT IN (3,7,12,5)
-    PG-->>SVC: [8, 15, 22, 31]
-    SVC->>N4: sort_candidates_by_interests(5, [8,15,22,31])
-    Note over N4: Ordena por intereses comunes DESC
-    N4-->>SVC: [22, 8, 31, 15]
-    SVC->>RD: LPUSH candidates:5 → [22,8,31,15] (TTL 300s)
-    
-    SVC->>RD: LPOP candidates:5
-    RD-->>SVC: 22
-    SVC->>PG: get_user_by_id(22) → datos estructurales
-    SVC->>MG: get_profile(22) → bio, fotos, características
-    SVC->>N4: intereses comunes entre 5 y 22
-    SVC-->>CLI: 📋 Perfil candidato completo
-```
+**Pasos del flujo:**
+1. **App** busca la caché de candidatos del usuario en Redis.
+2. Si **no hay caché**, inicia la generación:
+   * **App** obtiene las preferencias desde MongoDB (ej: edad 20-35).
+   * **App** obtiene usuarios a excluir desde Neo4j (ya likeados, bloqueados).
+   * **App** filtra demográficamente usando PostgreSQL.
+   * **App** ordena la lista resultante usando Neo4j (según intereses en común).
+   * **App** guarda la lista final ordenada en Redis (caché de 5 min).
+3. **App** extrae (LPOP) el primer candidato de la caché de Redis.
+4. **App** obtiene los datos relacionales de PostgreSQL y perfil completo desde MongoDB para ese candidato.
+5. **App** devuelve el perfil completo al Usuario.
 
 > **Detalle importante**: La lista de candidatos se cachea en Redis por 5 minutos. Si la lista no está, se regenera consultando MongoDB (preferencias), Neo4j (exclusiones + ranking), y PostgreSQL (filtro demográfico).
 
@@ -224,43 +134,15 @@ sequenceDiagram
 
 ### 🔵 Flujo D: Swipe con Match (el más complejo)
 
-```mermaid
-sequenceDiagram
-    participant CLI as CLI
-    participant SVC as AppService
-    participant RD as Redis
-    participant N4 as Neo4j
-    participant CS as Cassandra
-    participant PG as PostgreSQL
-    participant MG as MongoDB
-    
-    CLI->>SVC: hacer_swipe(token, user_to=8, positive=true)
-    SVC->>RD: Validar sesión → user_from=5
-    
-    SVC->>N4: MERGE (5)-[:LE_DIO_LIKE]->(8)
-    SVC->>CS: INSERT swipes_por_dia + swipes_recibidos
-    Note over CS: ⚠️ Si falla → warning, continúa
-    
-    SVC->>N4: check_reciprocity(5, 8)
-    Note over N4: ¿(8)-[:LE_DIO_LIKE]->(5) existe?
-    N4-->>SVC: ✅ SÍ → ¡MATCH!
-    
-    SVC->>PG: INSERT coincidencias_confirmadas → match_id
-    Note over PG: CHECK(user_id_1 < user_id_2)
-    PG-->>SVC: match_id = 42
-    
-    SVC->>CS: INSERT matches_por_dia(fecha, match_id, ...)
-    Note over CS: ⚠️ Si falla → warning, continúa
-    
-    SVC->>N4: MERGE MATCH_CON bidireccional + DELETE likes
-    Note over N4: ⚠️ Si falla → consistencia eventual
-    
-    SVC->>MG: create_notification(5, "Match con 8!")
-    SVC->>MG: create_notification(8, "Match con 5!")
-    Note over MG: ⚠️ Si falla → no revierte el match
-    
-    SVC-->>CLI: 🎉 ¡¡ES UN MATCH!!
-```
+**Pasos del flujo:**
+1. **App** registra el Like ("LE_DIO_LIKE") en Neo4j.
+2. **App** guarda el Swipe como registro histórico en Cassandra.
+3. **App** revisa en Neo4j si hay reciprocidad (¿el otro usuario también le dio Like?).
+4. Si hay reciprocidad, ¡Es un MATCH!:
+   * Se registra el Match oficial en PostgreSQL.
+   * Se registra el log del Match en Cassandra por día.
+   * Se crea la relación "MATCH_CON" en Neo4j.
+   * Se envía notificación a ambos usuarios usando MongoDB.
 
 > **Jerarquía de criticidad**:
 > - PostgreSQL (match oficial) → **OBLIGATORIO**. Si falla, se hace rollback del like en Neo4j.
@@ -274,24 +156,11 @@ sequenceDiagram
 
 ### 🔵 Flujo E: Mensajería
 
-```mermaid
-sequenceDiagram
-    participant CLI as CLI
-    participant SVC as AppService
-    participant RD as Redis
-    participant PG as PostgreSQL
-    participant CS as Cassandra
-    participant MG as MongoDB
-    
-    CLI->>SVC: enviar_mensaje(token, match_id=42, "Hola!")
-    SVC->>RD: Validar sesión → sender_id=5
-    SVC->>PG: Verificar que match_id=42 pertenece a user 5
-    PG-->>SVC: ✅ Match confirmado (users 5 y 8)
-    SVC->>CS: INSERT mensajes_por_conversacion<br/>(match_id=42, timestamp=NOW, sender=5, texto="Hola!")
-    Note over CS: Partition Key = match_id<br/>Clustering Key = timestamp ASC
-    SVC->>MG: create_notification(8, "Nuevo mensaje de Carlos: 'Hola!'")
-    SVC-->>CLI: ✅ Mensaje enviado
-```
+**Pasos del flujo:**
+1. **App** valida que la sesión existe en Redis.
+2. **App** verifica en PostgreSQL que el Match es válido.
+3. **App** guarda el mensaje en Cassandra, agrupado por la conversación (`match_id`) y ordenado por fecha de envío.
+4. **App** genera una notificación de nuevo mensaje para el receptor y la guarda en MongoDB.
 
 > Los mensajes se guardan en Cassandra particionados por `match_id` y ordenados físicamente por `timestamp ASC`. Esto permite recuperar un historial de chat completo en una sola lectura secuencial de disco, sin locks.
 
@@ -301,18 +170,10 @@ sequenceDiagram
 
 ### 🔵 Flujo F: Bloqueo de Usuario
 
-```mermaid
-sequenceDiagram
-    participant SVC as AppService
-    participant N4 as Neo4j
-    participant PG as PostgreSQL
-    participant MG as MongoDB
-    
-    SVC->>N4: MERGE (5)-[:BLOQUEO]->(8)<br/>+ DELETE likes y MATCH_CON existentes
-    Note over N4: En UNA sola transacción Cypher:<br/>crea bloqueo + poda relaciones
-    SVC->>PG: INSERT bloqueos_auditoria (registro legal)
-    SVC->>MG: INSERT en colección "bloqueos" (log documental)
-```
+**Pasos del flujo:**
+1. **App** registra en Neo4j la relación de "BLOQUEO" y automáticamente elimina los Likes o Matches previos que hubiera entre ambos.
+2. **App** inserta el bloqueo en la tabla de auditoría legal de PostgreSQL.
+3. **App** inserta un log en la colección de bloqueos de MongoDB para analíticas.
 
 **Código**: [bloquear_usuario](file:///c:/Users/Bruno/Documents/Facu/multi-db-tinderlike-app/src/services/app_service.py#L522-L551)
 

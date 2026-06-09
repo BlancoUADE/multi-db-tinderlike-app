@@ -390,16 +390,31 @@ class ReportService:
         pg_conn = get_postgres_connection()
         user_ids = {}
         pass_hash = hashlib.sha256("password123".encode("utf-8")).hexdigest()
+        
+        # Characteristics map
+        chars_map = {
+            "Carlos": {"signo": "Escorpio", "altura": 178, "color_pelo": "Castaño"},
+            "Sofia": {"signo": "Piscis", "altura": 165, "color_pelo": "Rubio"},
+            "Mateo": {"signo": "Escorpio", "altura": 182, "color_pelo": "Castaño"},
+            "Valentina": {"signo": "Escorpio", "altura": 170, "color_pelo": "Castaño"},
+            "Lucia": {"signo": "Aries", "altura": 160, "color_pelo": "Rubio"},
+            "Diego": {"signo": "Tauro", "altura": 180, "color_pelo": "Castaño"},
+            "Camila": {"signo": "Virgo", "altura": 168, "color_pelo": "Negro"},
+            "Nicolas": {"signo": "Escorpio", "altura": 175, "color_pelo": "Negro"}
+        }
+        
         try:
             with pg_conn.cursor() as cur:
                 for nombre, email, edad, genero, ubicacion in seed_users:
+                    # Also set biografia and preferences in Postgres
+                    bio = f"Hola, soy {nombre} y busco conocer gente."
                     cur.execute(
                         """
-                        INSERT INTO users (nombre, email, password_hash, edad, genero, ubicacion)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO users (nombre, email, password_hash, edad, genero, ubicacion, biografia, pref_edad_min, pref_edad_max)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id;
                         """,
-                        (nombre, email, pass_hash, edad, genero, ubicacion)
+                        (nombre, email, pass_hash, edad, genero, ubicacion, bio, 20, 35)
                     )
                     user_ids[nombre] = cur.fetchone()[0]
             pg_conn.commit()
@@ -420,17 +435,21 @@ class ReportService:
             "Nicolas": ["nicolas.jpg"]
         }
         
-        # Characteristics map
-        chars_map = {
-            "Carlos": {"signo": "Escorpio", "altura": 178, "color_pelo": "Castaño"},
-            "Sofia": {"signo": "Piscis", "altura": 165, "color_pelo": "Rubio"},
-            "Mateo": {"signo": "Escorpio", "altura": 182, "color_pelo": "Castaño"},
-            "Valentina": {"signo": "Escorpio", "altura": 170, "color_pelo": "Castaño"},
-            "Lucia": {"signo": "Aries", "altura": 160, "color_pelo": "Rubio"},
-            "Diego": {"signo": "Tauro", "altura": 180, "color_pelo": "Castaño"},
-            "Camila": {"signo": "Virgo", "altura": 168, "color_pelo": "Negro"},
-            "Nicolas": {"signo": "Escorpio", "altura": 175, "color_pelo": "Negro"}
-        }
+        # Sincronizar Fotos en PostgreSQL
+        pg_conn = get_postgres_connection()
+        try:
+            with pg_conn.cursor() as cur:
+                for nombre, photos in photos_map.items():
+                    u_id = user_ids[nombre]
+                    for idx, photo in enumerate(photos):
+                        es_principal = (idx == 0)
+                        cur.execute(
+                            "INSERT INTO fotos (id_usuario, url_archivo, es_principal) VALUES (%s, %s, %s)",
+                            (u_id, photo, es_principal)
+                        )
+            pg_conn.commit()
+        finally:
+            pg_conn.close()
 
         db = get_mongodb_database()
         for nombre, u_id in user_ids.items():
@@ -463,7 +482,26 @@ class ReportService:
         }
 
         neo4j_driver = get_neo4j_driver()
+        pg_conn = get_postgres_connection()
         try:
+            # Sync Intereses in PG
+            with pg_conn.cursor() as cur:
+                for nombre, interests in interests_map.items():
+                    u_id = user_ids[nombre]
+                    for it_name in interests:
+                        # Upsert interest
+                        cur.execute("INSERT INTO intereses (nombre) VALUES (%s) ON CONFLICT DO NOTHING RETURNING id;", (it_name,))
+                        row = cur.fetchone()
+                        if row:
+                            interest_id = row[0]
+                        else:
+                            cur.execute("SELECT id FROM intereses WHERE nombre = %s;", (it_name,))
+                            interest_id = cur.fetchone()[0]
+                            
+                        # Link to user
+                        cur.execute("INSERT INTO usuario_intereses (id_usuario, id_interes) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (u_id, interest_id))
+            pg_conn.commit()
+
             with neo4j_driver.session() as session:
                 # Create Usuario nodes
                 for nombre, u_id in user_ids.items():
@@ -481,6 +519,7 @@ class ReportService:
                         """, u_id=u_id, it_name=it_name)
         finally:
             neo4j_driver.close()
+            pg_conn.close()
 
         # 5. Create confirmed matches and Neo4j MATCH_CON edges
         logger.info("Generando matches y relaciones MATCH_CON...")
@@ -564,8 +603,18 @@ class ReportService:
             INSERT INTO swipes_recibidos_por_perfil (user_to, tipo, swipe_id, user_from, fecha)
             VALUES (?, ?, ?, ?, ?);
         """)
-        for u_from, u_to, s_type in swipes:
-            cassandra_session.execute(insert_swipe_c, [u_to, s_type, uuid.uuid4(), u_from, datetime.datetime.utcnow()])
+        
+        pg_conn = get_postgres_connection()
+        with pg_conn.cursor() as cur:
+            for u_from, u_to, s_type in swipes:
+                cassandra_session.execute(insert_swipe_c, [u_to, s_type, uuid.uuid4(), u_from, datetime.datetime.utcnow()])
+                # Sincronizar Like en PostgreSQL
+                cur.execute(
+                    "INSERT INTO likes (id_usuario_origen, id_usuario_destino, tipo) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING;",
+                    (u_from, u_to, s_type)
+                )
+        pg_conn.commit()
+        pg_conn.close()
 
         # Seed Messages in Cassandra (First messages for Report 4)
         insert_msg_c = cassandra_session.prepare("""
@@ -573,12 +622,19 @@ class ReportService:
             VALUES (?, ?, ?, ?, ?);
         """)
         
-        for m_id, id_a, id_b, _, m_ts in created_matches:
-            # Add first message exactly at the match timestamp
-            cassandra_session.execute(insert_msg_c, [m_id, m_ts, uuid.uuid4(), id_a, "¡Hola! ¿Cómo estás?"])
-            # Add a reply 5 minutes later
-            reply_ts = m_ts + datetime.timedelta(minutes=5)
-            cassandra_session.execute(insert_msg_c, [m_id, reply_ts, uuid.uuid4(), id_b, "¡Hola! Todo bien por suerte, ¿vos?"])
+        pg_conn = get_postgres_connection()
+        with pg_conn.cursor() as cur:
+            for m_id, id_a, id_b, _, m_ts in created_matches:
+                # Add first message exactly at the match timestamp
+                cassandra_session.execute(insert_msg_c, [m_id, m_ts, uuid.uuid4(), id_a, "¡Hola! ¿Cómo estás?"])
+                cur.execute("INSERT INTO mensajes (id_coincidencia, id_emisor, contenido) VALUES (%s, %s, %s);", (m_id, id_a, "¡Hola! ¿Cómo estás?"))
+                
+                # Add a reply 5 minutes later
+                reply_ts = m_ts + datetime.timedelta(minutes=5)
+                cassandra_session.execute(insert_msg_c, [m_id, reply_ts, uuid.uuid4(), id_b, "¡Hola! Todo bien por suerte, ¿vos?"])
+                cur.execute("INSERT INTO mensajes (id_coincidencia, id_emisor, contenido) VALUES (%s, %s, %s);", (m_id, id_b, "¡Hola! Todo bien por suerte, ¿vos?"))
+        pg_conn.commit()
+        pg_conn.close()
 
         # 7. Create Events and Attendances in PostgreSQL & Neo4j
         logger.info("Creando eventos sociales y registros de asistencia...")
@@ -748,5 +804,16 @@ class ReportService:
                 "timestamp": datetime.datetime.utcnow()
             }
         ])
+
+        # Sincronizar notificaciones en PostgreSQL
+        pg_conn = get_postgres_connection()
+        try:
+            with pg_conn.cursor() as cur:
+                cur.execute("INSERT INTO notificaciones (id_usuario, tipo) VALUES (%s, %s)", (id_carlos, "evento_asistencia"))
+                cur.execute("INSERT INTO notificaciones (id_usuario, tipo) VALUES (%s, %s)", (id_diego, "match"))
+                cur.execute("INSERT INTO notificaciones (id_usuario, tipo) VALUES (%s, %s)", (id_lucia, "mensaje"))
+            pg_conn.commit()
+        finally:
+            pg_conn.close()
 
         logger.info("=== BASE DE DATOS POBLADA EXITOSAMENTE CON DATOS DEMO ===")

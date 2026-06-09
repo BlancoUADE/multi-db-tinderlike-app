@@ -384,3 +384,210 @@ class PostgresRepository:
                 return [row[0] for row in rows]
         finally:
             conn.close()
+
+    def update_user_profile_fields(self, user_id, biografia, pref_edad_min, pref_edad_max):
+        """Update user profile fields in PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE users 
+                    SET biografia = %s, pref_edad_min = %s, pref_edad_max = %s
+                    WHERE id = %s;
+                    """,
+                    (biografia, pref_edad_min, pref_edad_max, user_id)
+                )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    def create_like(self, user_from, user_to, tipo="like"):
+        """Create a like or dislike in PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO likes (id_usuario_origen, id_usuario_destino, tipo)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (id_usuario_origen, id_usuario_destino) DO UPDATE 
+                      SET tipo = EXCLUDED.tipo, fecha_like = NOW()
+                    RETURNING id;
+                    """,
+                    (user_from, user_to, tipo)
+                )
+                like_id = cur.fetchone()[0]
+            conn.commit()
+            return like_id
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    def add_photo(self, user_id, url_archivo, es_principal=False):
+        """Add a photo for a user in PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO fotos (id_usuario, url_archivo, es_principal)
+                    VALUES (%s, %s, %s)
+                    RETURNING id;
+                    """,
+                    (user_id, url_archivo, es_principal)
+                )
+                photo_id = cur.fetchone()[0]
+            conn.commit()
+            return photo_id
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    def create_message(self, match_id, sender_id, contenido):
+        """Create a message in PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO mensajes (id_coincidencia, id_emisor, contenido)
+                    VALUES (%s, %s, %s)
+                    RETURNING id;
+                    """,
+                    (match_id, sender_id, contenido)
+                )
+                msg_id = cur.fetchone()[0]
+            conn.commit()
+            return msg_id
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    def get_messages_by_match(self, match_id):
+        """Retrieve messages for a specific match from PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, id_emisor, contenido, fecha_envio
+                    FROM mensajes
+                    WHERE id_coincidencia = %s
+                    ORDER BY fecha_envio ASC;
+                    """,
+                    (match_id,)
+                )
+                rows = cur.fetchall()
+                results = []
+                for row in rows:
+                    results.append({
+                        "id": row[0],
+                        "id_emisor": row[1],
+                        "contenido": row[2],
+                        "fecha_envio": row[3]
+                    })
+                return results
+        finally:
+            conn.close()
+
+    def create_notification(self, user_id, tipo, id_like=None, id_coincidencia=None, id_mensaje=None, id_evento=None):
+        """Create a notification in PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO notificaciones (id_usuario, tipo, id_like, id_coincidencia, id_mensaje, id_evento)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id;
+                    """,
+                    (user_id, tipo, id_like, id_coincidencia, id_mensaje, id_evento)
+                )
+                notif_id = cur.fetchone()[0]
+            conn.commit()
+            return notif_id
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    def upsert_interest(self, nombre):
+        """Insert interest if not exists, return its ID."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO intereses (nombre)
+                    VALUES (%s)
+                    ON CONFLICT (nombre) DO NOTHING
+                    RETURNING id;
+                    """,
+                    (nombre,)
+                )
+                row = cur.fetchone()
+                if row:
+                    interest_id = row[0]
+                else:
+                    cur.execute("SELECT id FROM intereses WHERE nombre = %s;", (nombre,))
+                    interest_id = cur.fetchone()[0]
+            conn.commit()
+            return interest_id
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    def update_user_interests(self, user_id, interest_names):
+        """Update user's interests in PostgreSQL."""
+        conn = get_postgres_connection()
+        try:
+            with conn.cursor() as cur:
+                # Delete existing relations
+                cur.execute("DELETE FROM usuario_intereses WHERE id_usuario = %s;", (user_id,))
+                
+                # Insert new ones
+                for name in interest_names:
+                    # First ensure interest exists (upsert)
+                    cur.execute(
+                        """
+                        INSERT INTO intereses (nombre)
+                        VALUES (%s)
+                        ON CONFLICT (nombre) DO NOTHING
+                        RETURNING id;
+                        """,
+                        (name,)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        interest_id = row[0]
+                    else:
+                        cur.execute("SELECT id FROM intereses WHERE nombre = %s;", (name,))
+                        interest_id = cur.fetchone()[0]
+                        
+                    # Link to user
+                    cur.execute(
+                        """
+                        INSERT INTO usuario_intereses (id_usuario, id_interes)
+                        VALUES (%s, %s);
+                        """,
+                        (user_id, interest_id)
+                    )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
