@@ -91,5 +91,5 @@ Los siete reportes de negocio requeridos se resuelven en las siguientes bases de
     *   *Estrategia*: Consulta en Cypher buscando parejas en relación `(:Usuario)-[:COINCIDIO_CON]-(:Usuario)` y contando las intersecciones en `[:TIENE_INTERES]`.
 6.  **Perfiles con más de 10 fotos y al menos 3 intereses en común** (MongoDB + Neo4j):
     *   *Estrategia*: MongoDB filtra los usuarios con `cantidad_fotos > 10`. Luego, Neo4j recibe los IDs y calcula mediante Cypher cuáles tienen 3 o más intereses compartidos con el usuario logueado.
-7.  **Coincidencias en fin de semana o feriados** (Cassandra + Postgres):
+7.  **Coincidencias en fin de semana o feriados** (Cassandra):
     *   *Estrategia*: Consulta `estadisticas_coincidencias_por_dia` en Cassandra para calcular los totales acumulados y porcentajes de coincidencia sobre días festivos y fines de semana.
