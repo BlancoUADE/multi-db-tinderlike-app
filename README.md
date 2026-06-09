@@ -11,9 +11,9 @@ El sistema integra cinco motores de bases de datos diferentes, cada uno optimiza
 | Base de Datos | Tipo | Rol en el Sistema | Justificación Técnica |
 | :--- | :--- | :--- | :--- |
 | **PostgreSQL** | Relacional | **Fuente de verdad transaccional** | Garantiza consistencia estricta (ACID) para registros de usuarios, configuraciones, autenticación, notificaciones, likes, coincidencias, bloqueos e historiales de citas. |
-| **Redis** | Clave-Valor | **Sesiones, contadores, alertas rápidas y caché** | Proporciona lecturas y escrituras de latencia sub-milisegundo para tokens de sesión (`TTL` automático), contadores atómicos de notificaciones no leídas, listas de alertas rápidas y caché de recomendaciones para evitar repeticiones de consultas complejas. |
+| **Redis** | Clave-Valor | **Sesiones, contadores, alertas por tipo y caché** | Proporciona lecturas y escrituras de latencia sub-milisegundo para tokens de sesión (`TTL` automático), contadores de cantidad de notificaciones (`notificaciones_cantidad`), listas de últimas notificaciones por tipo (`notificaciones_tipos`) y caché de recomendaciones para evitar repeticiones de consultas complejas. |
 | **MongoDB** | Documental | **Perfiles públicos y Logs de auditoría** | Almacena los perfiles en formato JSON denormalizado (incluyendo arrays de fotos e intereses) para lectura rápida sin joins. Registra eventos clave en una colección de logs históricos de actividad importante. |
-| **Cassandra** | Series de Tiempo | **Analíticas masivas y Métricas** | Diseñada para escritura ultra-rápida y consultas agregadas específicas sobre series temporales (swipes diarios, estadísticas de matches diarios, duración promedio conversación-cita). |
+| **Cassandra** | Series de Tiempo | **Analíticas masivas y Métricas** | Diseñada para escritura rápida y consultas agregadas específicas sobre series temporales (estadísticas de matches diarios y recuento de mensajes en la tabla `mensajes_por_evento`). |
 | **Neo4j** | Grafo | **Grafo Social y Recomendaciones** | Modela el mapa de interacciones sociales (`Usuario`, `Interes`, `Evento`) y resuelve de forma instantánea el algoritmo de perfiles sugeridos priorizando intereses en común y descartando bloqueos en red. |
 
 ---
@@ -80,13 +80,13 @@ python main.py
 Los siete reportes de negocio requeridos se resuelven en las siguientes bases de datos:
 
 1.  **Promedio de coincidencias por día** (Cassandra):
-    *   *Estrategia*: Lee la tabla `estadisticas_coincidencias_por_dia` y promedia la cantidad de coincidencias diarias en Python.
+    *   *Estrategia*: Lee la tabla `estadisticas_coincidencias_por_dia` para obtener coincidencias diarias. Permite visualizar desgloses semanales y por rangos de fechas específicos calculando promedios diarios de dicho período.
 2.  **Atributos más populares en perfiles** (MongoDB):
     *   *Estrategia*: Pipeline de agregación (`aggregate` con `$group`, `$unwind` y `$avg`) sobre la colección denormalizada `perfiles_publicos` para géneros, ubicaciones, edades, intereses comunes y cantidad de fotos.
 3.  **Perfiles con más swipes a la derecha** (Redis):
-    *   *Estrategia*: Ranking diario consultado en el Sorted Set de Redis (`top_swipes_dia`).
+    *   *Estrategia*: Ranking diario consultado en el Sorted Set de Redis (`top_swipes_dia`). Se retiró por completo la tabla histórica duplicada `swipes_perfil_total` de Cassandra para centralizar esta métrica en Redis de forma simplificada y ágil.
 4.  **Cantidad promedio de mensajes antes de una cita** (Cassandra):
-    *   *Estrategia*: Agrega la cantidad de mensajes antes de proponer la cita registradas en la tabla `mensajes_por_evento` y calcula su promedio general.
+    *   *Estrategia*: Agrega la cantidad de mensajes antes de proponer la cita registrados en la tabla `mensajes_por_evento` (con clave primaria compuesta por `(fecha_evento, id_evento)`) y calcula su promedio general.
 5.  **Intereses más comunes entre usuarios que coinciden** (Neo4j):
     *   *Estrategia*: Consulta en Cypher buscando parejas en relación `(:Usuario)-[:COINCIDIO_CON]-(:Usuario)` y contando las intersecciones en `[:TIENE_INTERES]`.
 6.  **Perfiles con más de 10 fotos y al menos 3 intereses en común** (MongoDB + Neo4j):
