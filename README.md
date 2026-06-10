@@ -11,7 +11,7 @@ El sistema integra cinco motores de bases de datos diferentes, cada uno optimiza
 | Base de Datos | Tipo | Rol en el Sistema | Justificación Técnica |
 | :--- | :--- | :--- | :--- |
 | **PostgreSQL** | Relacional | **Fuente de verdad transaccional** | Garantiza consistencia estricta (ACID) para registros de usuarios, configuraciones, autenticación, notificaciones, likes, coincidencias, bloqueos e historiales de citas. |
-| **Redis** | Clave-Valor | **Sesiones, contadores, alertas por tipo y caché** | Proporciona lecturas y escrituras de latencia sub-milisegundo para tokens de sesión (`TTL` automático), contadores de cantidad de notificaciones (`notificaciones_cantidad`), listas de últimas notificaciones por tipo (`notificaciones_tipos`) y caché de recomendaciones para evitar repeticiones de consultas complejas. |
+| **Redis** | Clave-Valor | **Sesiones, contadores, alertas por tipo y caché** | Proporciona lecturas y escrituras de latencia sub-milisegundo para tokens de sesión (`TTL` automático), contadores de cantidad de notificaciones (`notificaciones_cantidad_sin_leer`), listas de últimas notificaciones por tipo (`notificaciones_tipos`) y caché de recomendaciones para evitar repeticiones de consultas complejas. |
 | **MongoDB** | Documental | **Perfiles públicos y Logs de auditoría** | Almacena los perfiles en formato JSON denormalizado (incluyendo arrays de fotos e intereses) para lectura rápida sin joins. Registra eventos clave en una colección de logs históricos de actividad importante. |
 | **Cassandra** | Series de Tiempo | **Analíticas masivas y Métricas** | Diseñada para escritura rápida y consultas agregadas específicas sobre series temporales (estadísticas de matches diarios y recuento de mensajes en la tabla `mensajes_por_evento`). |
 | **Neo4j** | Grafo | **Grafo Social y Recomendaciones** | Modela el mapa de interacciones sociales (`Usuario`, `Interes`, `Evento`) y resuelve de forma instantánea el algoritmo de perfiles sugeridos priorizando intereses en común y descartando bloqueos en red. |
@@ -27,6 +27,9 @@ El sistema integra cinco motores de bases de datos diferentes, cada uno optimiza
     *   Se implementa una restricción de una sola foto principal por usuario en PostgreSQL mediante un índice parcial único.
     *   Se evita el auto-like, auto-bloqueo y la duplicación de matches/bloqueos activos.
 3.  **PostgreSQL como Fuente de Verdad (Single Source of Truth)**: Todas las operaciones de escritura crítica (Likes, Mensajes, Bloqueos, Registro) escriben primero en PostgreSQL. Si la transacción relacional es exitosa, se propagan las actualizaciones en cascada a NoSQL de forma resiliente ante fallos.
+4.  **Cálculo Dinámico de Edad (`fecha_nacimiento`)**: En PostgreSQL y MongoDB se reemplazó la edad estática por `fecha_nacimiento`. El cálculo de la edad se realiza dinámicamente en Python al consultar los perfiles, manteniendo consistencia y dinamismo temporal con la fecha actual.
+5.  **Coincidencias Bidireccionales en Neo4j**: Las relaciones de coincidencia (`COINCIDIO_CON`) en el grafo de Neo4j se modelan bidireccionalmente. Cuando ocurre un match mutuo, se graban dos aristas dirigidas (A -> B y B -> A), garantizando que las consultas de grafos no dependan del sentido del último like.
+6.  **Búsqueda Geoespacial con Redis**: Se utilizan comandos e índices geoespaciales de Redis (`GEOADD` y `GEORADIUS` / `GEOSEARCH`) mapeando las coordenadas (`latitud`, `longitud`) de los usuarios. Esto permite filtrar los perfiles compatibles ingresando un radio en kilómetros (ej. 50 km) y mostrando la distancia real al usuario consultante.
 
 ---
 

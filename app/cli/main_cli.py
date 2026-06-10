@@ -1,11 +1,12 @@
 import sys
-from datetime import datetime
+from datetime import datetime, date
 from app.services.auth_service import AuthService
 from app.services.profile_service import ProfileService
 from app.services.match_service import MatchService
 from app.services.event_service import EventService
 from app.services.block_service import BlockService
 from app.services.report_service import ReportService
+from app.repositories.postgres_repo import calcular_edad
 
 class TinderCLI:
     def __init__(self):
@@ -62,14 +63,30 @@ class TinderCLI:
             nombre = input("Nombre: ").strip()
             if not nombre: raise ValueError("El nombre es obligatorio.")
             
-            edad = int(input("Edad: ").strip())
-            if edad < 18: raise ValueError("Debes ser mayor de 18 años.")
+            fecha_nacimiento_input = input("Fecha de nacimiento (AAAA-MM-DD): ").strip()
+            try:
+                fecha_nacimiento = date.fromisoformat(fecha_nacimiento_input)
+            except Exception:
+                raise ValueError("Formato de fecha inválido. Debe ser AAAA-MM-DD.")
+                
+            edad = calcular_edad(fecha_nacimiento)
+            if edad < 18: raise ValueError("Debes ser mayor de 18 años para registrarte.")
             
             genero = input("Género (M/F/Otro): ").strip().upper()
             if genero not in ("M", "F", "OTRO"): raise ValueError("Género inválido.")
             
-            ubicacion = input("Ubicación (ej: CABA): ").strip()
-            if not ubicacion: raise ValueError("La ubicación es obligatoria.")
+            ubicacion = input("Ubicación (CABA / GBA / Rosario): ").strip().upper()
+            if not ubicacion or ubicacion not in ("CABA", "GBA", "ROSARIO"): 
+                raise ValueError("Ubicación inválida. Elija CABA, GBA o Rosario.")
+
+            # Set default coordinates based on location choice
+            lat, lon = 0.0, 0.0
+            if ubicacion == "CABA":
+                lat, lon = -34.6037, -58.3816
+            elif ubicacion == "GBA":
+                lat, lon = -34.5223, -58.5583
+            elif ubicacion == "ROSARIO":
+                lat, lon = -32.9468, -60.6393
             
             biografia = input("Biografía: ").strip()
             
@@ -90,9 +107,11 @@ class TinderCLI:
 
             user_data = {
                 "nombre": nombre,
-                "edad": edad,
+                "fecha_nacimiento": fecha_nacimiento,
                 "genero": genero,
                 "ubicacion": ubicacion,
+                "latitud": lat,
+                "longitud": lon,
                 "biografia": biografia,
                 "pref_edad_min": pref_edad_min,
                 "pref_edad_max": pref_edad_max,
@@ -229,19 +248,46 @@ class TinderCLI:
         self.print_header("Editar Datos Personales")
         try:
             nombre = input(f"Nombre [{self.current_user['nombre']}]: ").strip() or self.current_user['nombre']
-            edad = input(f"Edad [{self.current_user['edad']}]: ").strip()
-            edad = int(edad) if edad else self.current_user['edad']
+            
+            f_nac_actual = self.current_user.get("fecha_nacimiento")
+            f_nac_str = f_nac_actual.strftime("%Y-%m-%d") if isinstance(f_nac_actual, (date, datetime)) else str(f_nac_actual)
+            fecha_nacimiento_input = input(f"Fecha de nacimiento (AAAA-MM-DD) [{f_nac_str}]: ").strip()
+            
+            if fecha_nacimiento_input:
+                try:
+                    fecha_nacimiento = date.fromisoformat(fecha_nacimiento_input)
+                except Exception:
+                    raise ValueError("Formato de fecha inválido. Debe ser AAAA-MM-DD.")
+            else:
+                fecha_nacimiento = f_nac_actual
+                
+            edad = calcular_edad(fecha_nacimiento)
             if edad < 18: raise ValueError("Debes ser mayor de 18 años.")
             
             genero = input(f"Género (M/F/Otro) [{self.current_user['genero']}]: ").strip().upper() or self.current_user['genero']
-            ubicacion = input(f"Ubicación [{self.current_user['ubicacion']}]: ").strip() or self.current_user['ubicacion']
+            
+            ubicacion = input(f"Ubicación (CABA / GBA / Rosario) [{self.current_user['ubicacion']}]: ").strip().upper() or self.current_user['ubicacion']
+            if ubicacion not in ("CABA", "GBA", "ROSARIO"):
+                raise ValueError("Ubicación inválida. Elija CABA, GBA o Rosario.")
+                
             biografia = input(f"Biografía [{self.current_user['biografia'] or ''}]: ").strip() or self.current_user['biografia']
             
+            lat, lon = self.current_user.get("latitud"), self.current_user.get("longitud")
+            if ubicacion != self.current_user['ubicacion'] or lat is None or lon is None:
+                if ubicacion == "CABA":
+                    lat, lon = -34.6037, -58.3816
+                elif ubicacion == "GBA":
+                    lat, lon = -34.5223, -58.5583
+                elif ubicacion == "ROSARIO":
+                    lat, lon = -32.9468, -60.6393
+
             update_data = {
                 "nombre": nombre,
-                "edad": edad,
+                "fecha_nacimiento": fecha_nacimiento,
                 "genero": genero,
                 "ubicacion": ubicacion,
+                "latitud": lat,
+                "longitud": lon,
                 "biografia": biografia,
                 "pref_edad_min": self.current_user["pref_edad_min"],
                 "pref_edad_max": self.current_user["pref_edad_max"],
@@ -268,9 +314,11 @@ class TinderCLI:
             
             update_data = {
                 "nombre": self.current_user["nombre"],
-                "edad": self.current_user["edad"],
+                "fecha_nacimiento": self.current_user["fecha_nacimiento"],
                 "genero": self.current_user["genero"],
                 "ubicacion": self.current_user["ubicacion"],
+                "latitud": self.current_user.get("latitud"),
+                "longitud": self.current_user.get("longitud"),
                 "biografia": self.current_user["biografia"],
                 "pref_edad_min": pref_min,
                 "pref_edad_max": pref_max,
@@ -400,25 +448,44 @@ class TinderCLI:
         uid = self.current_user["id_usuario"]
         generos_permitidos = ["F"] if self.current_user["genero"] == "M" else ["M"] if self.current_user["genero"] == "F" else ["M", "F", "OTRO"]
         
+        self.print_header("Búsqueda de Perfiles Compatibles")
+        try:
+            radio_km_input = input("Ingrese el radio máximo de búsqueda en km (por defecto 100): ").strip()
+            radio_km = float(radio_km_input) if radio_km_input else 100.0
+        except ValueError:
+            print("Valor inválido. Se utilizará 100 km.")
+            radio_km = 100.0
+
+        # Query Redis for nearby users and their distances
+        try:
+            nearby_res = self.auth_service.redis_repo.obtener_usuarios_cercanos(uid, radio_km)
+            nearby_map = {item[0]: item[1] for item in nearby_res}
+        except Exception as e:
+            print(f"[WARNING] No se pudieron buscar ubicaciones en Redis: {e}")
+            nearby_map = {}
+
         # Try to pull cached recommendations from Redis
-        recomendados = self.auth_service.redis_repo.obtener_recomendaciones_cacheadas(uid)
-        if not recomendados:
+        recomendados_all = self.auth_service.redis_repo.obtener_recomendaciones_cacheadas(uid)
+        if not recomendados_all:
             # Calculate recommendation list via Neo4j
             try:
-                recomendados = self.auth_service.neo4j_repo.buscar_usuarios_compatibles(
+                recomendados_all = self.auth_service.neo4j_repo.buscar_usuarios_compatibles(
                     id_usuario=uid,
                     pref_edad_min=self.current_user["pref_edad_min"],
                     pref_edad_max=self.current_user["pref_edad_max"],
                     generos_permitidos=generos_permitidos
                 )
                 # Cache list in Redis for 5 minutes
-                self.auth_service.redis_repo.cachear_recomendaciones(uid, recomendados)
+                self.auth_service.redis_repo.cachear_recomendaciones(uid, recomendados_all)
             except Exception as e:
                 print(f"[ERROR] No se pudo buscar en el grafo de recomendaciones: {e}")
                 return
 
+        # Intersect compatible users with nearby users
+        recomendados = [uid_rec for uid_rec in recomendados_all if uid_rec in nearby_map]
+
         if not recomendados:
-            print("\nNo encontramos más perfiles compatibles con tus preferencias en este momento.")
+            print(f"\nNo encontramos más perfiles compatibles a menos de {radio_km} km en este momento.")
             input("Presione ENTER para volver...")
             return
 
@@ -430,12 +497,15 @@ class TinderCLI:
                 current_index += 1
                 continue
                 
+            distancia = nearby_map.get(target_id)
+            dist_str = f"{distancia:.1f} km" if distancia is not None else "Distancia desconocida"
+
             self.print_header(f"Perfil sugerido ({current_index + 1}/{len(recomendados)})")
             print(f"ID: {target_id}")
             print(f"Nombre: {perfil['nombre']}")
             print(f"Edad: {perfil['edad']}")
             print(f"Género: {perfil['genero']}")
-            print(f"Ubicación: {perfil['ubicacion']}")
+            print(f"Ubicación: {perfil['ubicacion']} ({dist_str} de ti)")
             print(f"Biografía: {perfil['biografia']}")
             print(f"Intereses: {', '.join(perfil['intereses']) if perfil['intereses'] else 'Sin intereses.'}")
             print(f"Cantidad de Fotos: {perfil['cantidad_fotos']}")

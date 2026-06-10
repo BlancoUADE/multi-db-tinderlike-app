@@ -68,6 +68,7 @@ class Neo4jRepository:
             MATCH (u1:Usuario {id_usuario: $id1})
             MATCH (u2:Usuario {id_usuario: $id2})
             MERGE (u1)-[:COINCIDIO_CON {fecha: datetime()}]->(u2)
+            MERGE (u2)-[:COINCIDIO_CON {fecha: datetime()}]->(u1)
         """
         with self.driver.session() as session:
             session.run(query, id1=id_usuario1, id2=id_usuario2)

@@ -2,6 +2,20 @@ from app.databases.postgres_conn import get_postgres_connection
 import psycopg2.extras
 from datetime import datetime, date
 
+def calcular_edad(fecha_nac):
+    if not fecha_nac:
+        return 0
+    if isinstance(fecha_nac, str):
+        try:
+            fecha_nac = date.fromisoformat(fecha_nac[:10])
+        except Exception:
+            return 0
+    elif isinstance(fecha_nac, datetime):
+        fecha_nac = fecha_nac.date()
+    
+    today = date.today()
+    return today.year - fecha_nac.year - ((today.month, today.day) < (fecha_nac.month, fecha_nac.day))
+
 class PostgresRepository:
     def __init__(self):
         pass
@@ -33,34 +47,41 @@ class PostgresRepository:
     # --- USUARIOS ---
     def crear_usuario(self, user_data):
         query = """
-            INSERT INTO usuarios (nombre, edad, genero, ubicacion, biografia, pref_edad_min, pref_edad_max, email, password_hash, fecha_registro)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
+            INSERT INTO usuarios (nombre, fecha_nacimiento, genero, ubicacion, biografia, pref_edad_min, pref_edad_max, email, password_hash, fecha_registro, latitud, longitud)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), %s, %s)
             RETURNING id_usuario;
         """
         params = (
-            user_data["nombre"], user_data["edad"], user_data["genero"], user_data["ubicacion"],
+            user_data["nombre"], user_data["fecha_nacimiento"], user_data["genero"], user_data["ubicacion"],
             user_data.get("biografia", ""), user_data["pref_edad_min"], user_data["pref_edad_max"],
-            user_data["email"], user_data["password_hash"], user_data.get("fecha_registro")
+            user_data["email"], user_data["password_hash"], user_data.get("fecha_registro"),
+            user_data.get("latitud"), user_data.get("longitud")
         )
         return self._execute(query, params, return_id=True)
 
     def obtener_usuario_por_id(self, id_usuario):
-        return self._execute("SELECT * FROM usuarios WHERE id_usuario = %s", (id_usuario,), fetch_one=True)
+        user = self._execute("SELECT * FROM usuarios WHERE id_usuario = %s", (id_usuario,), fetch_one=True)
+        if user and "fecha_nacimiento" in user and user["fecha_nacimiento"]:
+            user["edad"] = calcular_edad(user["fecha_nacimiento"])
+        return user
 
     def obtener_usuario_por_email(self, email):
-        return self._execute("SELECT * FROM usuarios WHERE email = %s", (email,), fetch_one=True)
+        user = self._execute("SELECT * FROM usuarios WHERE email = %s", (email,), fetch_one=True)
+        if user and "fecha_nacimiento" in user and user["fecha_nacimiento"]:
+            user["edad"] = calcular_edad(user["fecha_nacimiento"])
+        return user
 
     def actualizar_usuario(self, id_usuario, update_data):
         query = """
             UPDATE usuarios
-            SET nombre = %s, edad = %s, genero = %s, ubicacion = %s, biografia = %s,
-                pref_edad_min = %s, pref_edad_max = %s, email = %s
+            SET nombre = %s, fecha_nacimiento = %s, genero = %s, ubicacion = %s, biografia = %s,
+                pref_edad_min = %s, pref_edad_max = %s, email = %s, latitud = %s, longitud = %s
             WHERE id_usuario = %s
         """
         params = (
-            update_data["nombre"], update_data["edad"], update_data["genero"], update_data["ubicacion"],
+            update_data["nombre"], update_data["fecha_nacimiento"], update_data["genero"], update_data["ubicacion"],
             update_data.get("biografia", ""), update_data["pref_edad_min"], update_data["pref_edad_max"],
-            update_data["email"], id_usuario
+            update_data["email"], update_data.get("latitud"), update_data.get("longitud"), id_usuario
         )
         self._execute(query, params)
 

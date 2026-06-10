@@ -116,8 +116,8 @@ class MatchService:
                 notif_destino = self.pg_repo.crear_notificacion(id_usuario_destino, "COINCIDENCIA", id_coincidencia=id_coincidencia)
                 
                 # Notify both in Redis
-                self.redis_repo.incrementar_notificaciones_cantidad(id_usuario_origen)
-                self.redis_repo.incrementar_notificaciones_cantidad(id_usuario_destino)
+                self.redis_repo.incrementar_notificaciones_cantidad_sin_leer(id_usuario_origen)
+                self.redis_repo.incrementar_notificaciones_cantidad_sin_leer(id_usuario_destino)
                 
                 user_origen = self.pg_repo.obtener_usuario_por_id(id_usuario_origen)
                 user_destino = self.pg_repo.obtener_usuario_por_id(id_usuario_destino)
@@ -146,7 +146,7 @@ class MatchService:
                 # Create like notification in Postgres
                 notif_id = self.pg_repo.crear_notificacion(id_usuario_destino, "LIKE", id_like=id_like)
                 
-                self.redis_repo.incrementar_notificaciones_cantidad(id_usuario_destino)
+                self.redis_repo.incrementar_notificaciones_cantidad_sin_leer(id_usuario_destino)
                 self.redis_repo.agregar_notificacion_tipo(id_usuario_destino, {
                     "id_notificacion": notif_id,
                     "tipo": "LIKE",
@@ -204,7 +204,7 @@ class MatchService:
         
         # 3. Redis update for receptor
         try:
-            self.redis_repo.incrementar_notificaciones_cantidad(id_receptor)
+            self.redis_repo.incrementar_notificaciones_cantidad_sin_leer(id_receptor)
             user_emisor = self.pg_repo.obtener_usuario_por_id(id_emisor)
             self.redis_repo.agregar_notificacion_tipo(id_receptor, {
                 "id_notificacion": notif_id,
@@ -253,13 +253,13 @@ class MatchService:
         
         # 2. Redis Reset
         try:
-            self.redis_repo.resetear_notificaciones_cantidad(id_usuario)
+            self.redis_repo.resetear_notificaciones_cantidad_sin_leer(id_usuario)
         except Exception as e:
             print(f"[SYNC ERROR] Redis notifications reset failed: {e}")
 
     def obtener_contador_no_leidas(self, id_usuario):
         try:
-            return self.redis_repo.obtener_notificaciones_cantidad_count(id_usuario)
+            return self.redis_repo.obtener_notificaciones_cantidad_sin_leer_count(id_usuario)
         except Exception:
             # Fallback to Postgres count
             notifs = self.pg_repo.obtener_notificaciones_no_leidas(id_usuario)

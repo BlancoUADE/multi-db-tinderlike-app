@@ -1,4 +1,5 @@
-from app.repositories.postgres_repo import PostgresRepository
+from datetime import datetime, date
+from app.repositories.postgres_repo import PostgresRepository, calcular_edad
 from app.repositories.mongo_repo import MongoRepository
 from app.repositories.neo4j_repo import Neo4jRepository
 from app.repositories.redis_repo import RedisRepository
@@ -26,11 +27,20 @@ class ProfileService:
             photos = self.pg_repo.obtener_fotos_usuario(id_usuario)
             photos_list = [{"url": p["url_archivo"], "principal": p["es_principal"]} for p in photos]
             
+            # Format birthday as YYYY-MM-DD
+            fecha_nac_str = ""
+            if "fecha_nacimiento" in user and user["fecha_nacimiento"]:
+                f_nac = user["fecha_nacimiento"]
+                fecha_nac_str = f_nac.strftime("%Y-%m-%d") if isinstance(f_nac, (date, datetime)) else str(f_nac)
+
             perfil_denorm = {
                 "nombre": user["nombre"],
+                "fecha_nacimiento": fecha_nac_str,
                 "edad": user["edad"],
                 "genero": user["genero"],
                 "ubicacion": user["ubicacion"],
+                "latitud": user.get("latitud"),
+                "longitud": user.get("longitud"),
                 "biografia": user.get("biografia") or "",
                 "intereses": interest_names,
                 "fotos": photos_list,
@@ -56,12 +66,21 @@ class ProfileService:
                     return None
                 interests = self.pg_repo.obtener_intereses_usuario(id_usuario)
                 photos = self.pg_repo.obtener_fotos_usuario(id_usuario)
+                
+                fecha_nac_str = ""
+                if "fecha_nacimiento" in user and user["fecha_nacimiento"]:
+                    f_nac = user["fecha_nacimiento"]
+                    fecha_nac_str = f_nac.strftime("%Y-%m-%d") if isinstance(f_nac, (date, datetime)) else str(f_nac)
+
                 perfil = {
                     "id_usuario": id_usuario,
                     "nombre": user["nombre"],
+                    "fecha_nacimiento": fecha_nac_str,
                     "edad": user["edad"],
                     "genero": user["genero"],
                     "ubicacion": user["ubicacion"],
+                    "latitud": user.get("latitud"),
+                    "longitud": user.get("longitud"),
                     "biografia": user["biografia"] or "",
                     "intereses": [i["nombre"] for i in interests],
                     "fotos": [{"url": p["url_archivo"], "principal": p["es_principal"]} for p in photos],
@@ -75,10 +94,11 @@ class ProfileService:
 
         # 2. Sync Neo4j Node
         try:
+            edad_calc = calcular_edad(update_data["fecha_nacimiento"])
             self.neo4j_repo.crear_usuario_nodo(
                 id_usuario=id_usuario,
                 nombre=update_data["nombre"],
-                edad=update_data["edad"],
+                edad=edad_calc,
                 genero=update_data["genero"],
                 ubicacion=update_data["ubicacion"]
             )

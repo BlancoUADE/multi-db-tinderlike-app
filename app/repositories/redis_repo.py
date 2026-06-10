@@ -17,14 +17,14 @@ class RedisRepository:
         self.r.delete(f"session:{token}")
 
     # --- CONTADOR DE NOTIFICACIONES ---
-    def incrementar_notificaciones_cantidad(self, id_usuario):
-        self.r.incr(f"notificaciones_cantidad:{id_usuario}")
+    def incrementar_notificaciones_cantidad_sin_leer(self, id_usuario):
+        self.r.incr(f"notificaciones_cantidad_sin_leer:{id_usuario}")
 
-    def resetear_notificaciones_cantidad(self, id_usuario):
-        self.r.set(f"notificaciones_cantidad:{id_usuario}", 0)
+    def resetear_notificaciones_cantidad_sin_leer(self, id_usuario):
+        self.r.set(f"notificaciones_cantidad_sin_leer:{id_usuario}", 0)
 
-    def obtener_notificaciones_cantidad_count(self, id_usuario):
-        val = self.r.get(f"notificaciones_cantidad:{id_usuario}")
+    def obtener_notificaciones_cantidad_sin_leer_count(self, id_usuario):
+        val = self.r.get(f"notificaciones_cantidad_sin_leer:{id_usuario}")
         return int(val) if val else 0
 
     # --- LISTA DE ÚLTIMAS NOTIFICACIONES POR TIPO ---
@@ -66,3 +66,36 @@ class RedisRepository:
 
     def eliminar_recomendaciones_cache(self, id_usuario):
         self.r.delete(f"recomendaciones:{id_usuario}")
+
+    # --- GEOLOCALIZACIÓN ---
+    def indexar_ubicacion_usuario(self, id_usuario, longitud, latitud):
+        if longitud is not None and latitud is not None:
+            # redis-py geoadd format: geoadd(name, [longitude, latitude, member])
+            self.r.geoadd("usuarios_ubicaciones", [float(longitud), float(latitud), str(id_usuario)])
+
+    def obtener_usuarios_cercanos(self, id_usuario, radio_km):
+        try:
+            # Try GEOSEARCH (available in Redis 6.2+ and redis-py 4+)
+            res = self.r.geosearch(
+                "usuarios_ubicaciones",
+                member=str(id_usuario),
+                radius=float(radio_km),
+                unit="km",
+                withdist=True
+            )
+            # res is a list of [member, distance]
+            return [(int(item[0]), float(item[1])) for item in res if int(item[0]) != int(id_usuario)]
+        except Exception:
+            # Fallback to GEORADIUSBYMEMBER for older Redis or older redis-py
+            try:
+                res = self.r.georadiusbymember(
+                    "usuarios_ubicaciones",
+                    str(id_usuario),
+                    float(radio_km),
+                    unit="km",
+                    withdist=True
+                )
+                return [(int(item[0]), float(item[1])) for item in res if int(item[0]) != int(id_usuario)]
+            except Exception as e:
+                print(f"[REDIS ERROR] Geospatial query failed: {e}")
+                return []

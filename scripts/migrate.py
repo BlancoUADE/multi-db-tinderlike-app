@@ -38,7 +38,7 @@ def migrate_postgres():
         CREATE TABLE IF NOT EXISTS usuarios (
             id_usuario SERIAL PRIMARY KEY,
             nombre VARCHAR(100) NOT NULL,
-            edad INT NOT NULL,
+            fecha_nacimiento DATE NOT NULL,
             genero VARCHAR(10) NOT NULL,
             ubicacion VARCHAR(100) NOT NULL,
             biografia TEXT,
@@ -47,7 +47,9 @@ def migrate_postgres():
             fecha_registro TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             email VARCHAR(255) UNIQUE NOT NULL,
             password_hash VARCHAR(255) NOT NULL,
-            activo BOOLEAN NOT NULL DEFAULT TRUE
+            activo BOOLEAN NOT NULL DEFAULT TRUE,
+            latitud DOUBLE PRECISION,
+            longitud DOUBLE PRECISION
         );
     """)
     

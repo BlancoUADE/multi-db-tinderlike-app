@@ -19,11 +19,11 @@ def test_neo4j():
 def test_postgres():
     conn = get_postgres_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id_usuario, nombre, edad, email FROM usuarios;")
+    cur.execute("SELECT id_usuario, nombre, fecha_nacimiento, email FROM usuarios;")
     rows = cur.fetchall()
     print(f"Postgres usuarios count: {len(rows)}")
     for r in rows:
-        print(f"  {r[1]} (ID: {r[0]}, Email: {r[3]})")
+        print(f"  {r[1]} (ID: {r[0]}, Fecha Nacimiento: {r[2]}, Email: {r[3]})")
     
     cur.execute("SELECT id_usuario_origen, id_usuario_destino FROM likes;")
     likes = cur.fetchall()

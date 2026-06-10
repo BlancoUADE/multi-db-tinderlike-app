@@ -1,6 +1,7 @@
 import hashlib
 import uuid
-from app.repositories.postgres_repo import PostgresRepository
+from datetime import datetime, date
+from app.repositories.postgres_repo import PostgresRepository, calcular_edad
 from app.repositories.redis_repo import RedisRepository
 from app.repositories.mongo_repo import MongoRepository
 from app.repositories.neo4j_repo import Neo4jRepository
@@ -22,6 +23,9 @@ class AuthService:
         # Hash password
         user_data["password_hash"] = self._hash_password(user_data["password"])
         
+        # Calculate age
+        edad_calc = calcular_edad(user_data["fecha_nacimiento"])
+        
         # 1. Write to PostgreSQL (source of truth)
         id_usuario = self.pg_repo.crear_usuario(user_data)
         
@@ -30,7 +34,7 @@ class AuthService:
             self.neo4j_repo.crear_usuario_nodo(
                 id_usuario=id_usuario,
                 nombre=user_data["nombre"],
-                edad=user_data["edad"],
+                edad=edad_calc,
                 genero=user_data["genero"],
                 ubicacion=user_data["ubicacion"]
             )
@@ -39,11 +43,17 @@ class AuthService:
 
         # 3. Denormalize to MongoDB
         try:
+            f_nac = user_data["fecha_nacimiento"]
+            fecha_nac_str = f_nac.strftime("%Y-%m-%d") if isinstance(f_nac, (date, datetime)) else str(f_nac)
+            
             perfil_denorm = {
                 "nombre": user_data["nombre"],
-                "edad": user_data["edad"],
+                "fecha_nacimiento": fecha_nac_str,
+                "edad": edad_calc,
                 "genero": user_data["genero"],
                 "ubicacion": user_data["ubicacion"],
+                "latitud": user_data.get("latitud"),
+                "longitud": user_data.get("longitud"),
                 "biografia": user_data.get("biografia", ""),
                 "intereses": [],
                 "fotos": [],
@@ -53,7 +63,17 @@ class AuthService:
         except Exception as e:
             print(f"[SYNC ERROR] MongoDB public profile creation failed: {e}")
 
-        # 4. Log Activity in MongoDB
+        # 4. Index location in Redis
+        try:
+            self.redis_repo.indexar_ubicacion_usuario(
+                id_usuario, 
+                user_data.get("longitud"), 
+                user_data.get("latitud")
+            )
+        except Exception as e:
+            print(f"[SYNC ERROR] Redis location indexing failed: {e}")
+
+        # 5. Log Activity in MongoDB
         try:
             self.mongo_repo.registrar_actividad(
                 tipo_evento="USUARIO_REGISTRADO",

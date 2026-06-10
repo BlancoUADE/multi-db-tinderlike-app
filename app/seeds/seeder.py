@@ -94,18 +94,19 @@ class Seeder:
             """, (f_date, desc, desc))
 
         # 1.2 Usuarios (Registrados en el Día -5)
+        # Lat/lon coordinates with slight variations around CABA, GBA, and Rosario
         usuarios_data = [
-            {"nombre": "Martina", "edad": 26, "genero": "F", "ubicacion": "CABA", "biografia": "Me gusta el cine y viajar", "pref_edad_min": 22, "pref_edad_max": 30, "email": "martina@example.com", "password": "password123", "foto": "martina_perfil.jpg", "intereses": "cine,viajar,musica,fotografia"},
-            {"nombre": "Sofia", "edad": 28, "genero": "F", "ubicacion": "CABA", "biografia": "Lectura y buen café", "pref_edad_min": 24, "pref_edad_max": 32, "email": "sofia@example.com", "password": "password123", "foto": "sofia_perfil.jpg", "intereses": "lectura,musica,arte"},
-            {"nombre": "Juan", "edad": 27, "genero": "M", "ubicacion": "CABA", "biografia": "Fan de los deportes y cocinar", "pref_edad_min": 23, "pref_edad_max": 30, "email": "juan@example.com", "password": "password123", "foto": "juan_perfil.jpg", "intereses": "deportes,gastronomia,musica,cine"},
-            {"nombre": "Mateo", "edad": 25, "genero": "M", "ubicacion": "GBA", "biografia": "Programador y melómano", "pref_edad_min": 20, "pref_edad_max": 28, "email": "mateo@example.com", "password": "password123", "foto": "mateo_perfil.jpg", "intereses": "musica,tecnologia,viajar"},
-            {"nombre": "Camila", "edad": 23, "genero": "F", "ubicacion": "Rosario", "biografia": "Amo la fotografía y los animales", "pref_edad_min": 21, "pref_edad_max": 30, "email": "camila@example.com", "password": "password123", "foto": "camila_perfil.jpg", "intereses": "fotografia,arte,viajar"},
-            {"nombre": "Nicolas", "edad": 31, "genero": "M", "ubicacion": "CABA", "biografia": "Apasionado por la tecnología", "pref_edad_min": 26, "pref_edad_max": 35, "email": "nicolas@example.com", "password": "password123", "foto": "nicolas_perfil.jpg", "intereses": "tecnologia,deportes,cine"},
-            {"nombre": "Valentina", "edad": 24, "genero": "F", "ubicacion": "GBA", "biografia": "Estudiante de arte", "pref_edad_min": 22, "pref_edad_max": 29, "email": "valentina@example.com", "password": "password123", "foto": "valentina_perfil.jpg", "intereses": "arte,fotografia,lectura,cine"},
-            {"nombre": "Lucas", "edad": 29, "genero": "M", "ubicacion": "Rosario", "biografia": "Viajero frecuente", "pref_edad_min": 22, "pref_edad_max": 33, "email": "lucas@example.com", "password": "password123", "foto": "lucas_perfil.jpg", "intereses": "viajar,gastronomia,deportes"},
-            {"nombre": "Agustina", "edad": 32, "genero": "F", "ubicacion": "CABA", "biografia": "Amo la gastronomía gourmet", "pref_edad_min": 28, "pref_edad_max": 36, "email": "agustina@example.com", "password": "password123", "foto": "agustina_perfil.jpg", "intereses": "gastronomia,viajar,arte"},
-            {"nombre": "Joaquin", "edad": 30, "genero": "M", "ubicacion": "CABA", "biografia": "Música clásica e historia", "pref_edad_min": 25, "pref_edad_max": 33, "email": "joaquin@example.com", "password": "password123", "foto": "joaquin_perfil.jpg", "intereses": "musica,lectura,cine"},
-            {"nombre": "Diego", "edad": 25, "genero": "M", "ubicacion": "CABA", "biografia": "Amante de la fotografía y trekking", "pref_edad_min": 20, "pref_edad_max": 30, "email": "diego@example.com", "password": "password123", "foto": "diego_foto_1.jpg", "intereses": "fotografia,viajar,cine,deportes,musica"}
+            {"nombre": "Martina", "edad": 26, "genero": "F", "ubicacion": "CABA", "biografia": "Me gusta el cine y viajar", "pref_edad_min": 22, "pref_edad_max": 30, "email": "martina@example.com", "password": "password123", "foto": "martina_perfil.jpg", "intereses": "cine,viajar,musica,fotografia", "lat": -34.6037 + 0.012, "lon": -58.3816 - 0.005},
+            {"nombre": "Sofia", "edad": 28, "genero": "F", "ubicacion": "CABA", "biografia": "Lectura y buen café", "pref_edad_min": 24, "pref_edad_max": 32, "email": "sofia@example.com", "password": "password123", "foto": "sofia_perfil.jpg", "intereses": "lectura,musica,arte", "lat": -34.6037 - 0.008, "lon": -58.3816 + 0.015},
+            {"nombre": "Juan", "edad": 27, "genero": "M", "ubicacion": "CABA", "biografia": "Fan de los deportes y cocinar", "pref_edad_min": 23, "pref_edad_max": 30, "email": "juan@example.com", "password": "password123", "foto": "juan_perfil.jpg", "intereses": "deportes,gastronomia,musica,cine", "lat": -34.6037 + 0.005, "lon": -58.3816 - 0.010},
+            {"nombre": "Mateo", "edad": 25, "genero": "M", "ubicacion": "GBA", "biografia": "Programador y melómano", "pref_edad_min": 20, "pref_edad_max": 28, "email": "mateo@example.com", "password": "password123", "foto": "mateo_perfil.jpg", "intereses": "musica,tecnologia,viajar", "lat": -34.5223 + 0.015, "lon": -58.5583 - 0.008},
+            {"nombre": "Camila", "edad": 23, "genero": "F", "ubicacion": "Rosario", "biografia": "Amo la fotografía y los animales", "pref_edad_min": 21, "pref_edad_max": 30, "email": "camila@example.com", "password": "password123", "foto": "camila_perfil.jpg", "intereses": "fotografia,arte,viajar", "lat": -32.9468 - 0.010, "lon": -60.6393 + 0.005},
+            {"nombre": "Nicolas", "edad": 31, "genero": "M", "ubicacion": "CABA", "biografia": "Apasionado por la tecnología", "pref_edad_min": 26, "pref_edad_max": 35, "email": "nicolas@example.com", "password": "password123", "foto": "nicolas_perfil.jpg", "intereses": "tecnologia,deportes,cine", "lat": -34.6037 - 0.015, "lon": -58.3816 - 0.002},
+            {"nombre": "Valentina", "edad": 24, "genero": "F", "ubicacion": "GBA", "biografia": "Estudiante de arte", "pref_edad_min": 22, "pref_edad_max": 29, "email": "valentina@example.com", "password": "password123", "foto": "valentina_perfil.jpg", "intereses": "arte,fotografia,lectura,cine", "lat": -34.5223 - 0.005, "lon": -58.5583 + 0.012},
+            {"nombre": "Lucas", "edad": 29, "genero": "M", "ubicacion": "Rosario", "biografia": "Viajero frecuente", "pref_edad_min": 22, "pref_edad_max": 33, "email": "lucas@example.com", "password": "password123", "foto": "lucas_perfil.jpg", "intereses": "viajar,gastronomia,deportes", "lat": -32.9468 + 0.008, "lon": -60.6393 - 0.015},
+            {"nombre": "Agustina", "edad": 32, "genero": "F", "ubicacion": "CABA", "biografia": "Amo la gastronomía gourmet", "pref_edad_min": 28, "pref_edad_max": 36, "email": "agustina@example.com", "password": "password123", "foto": "agustina_perfil.jpg", "intereses": "gastronomia,viajar,arte", "lat": -34.6037 + 0.020, "lon": -58.3816 + 0.008},
+            {"nombre": "Joaquin", "edad": 30, "genero": "M", "ubicacion": "CABA", "biografia": "Música clásica e historia", "pref_edad_min": 25, "pref_edad_max": 33, "email": "joaquin@example.com", "password": "password123", "foto": "joaquin_perfil.jpg", "intereses": "musica,lectura,cine", "lat": -34.6037 - 0.010, "lon": -58.3816 - 0.012},
+            {"nombre": "Diego", "edad": 25, "genero": "M", "ubicacion": "CABA", "biografia": "Amante de la fotografía y trekking", "pref_edad_min": 20, "pref_edad_max": 30, "email": "diego@example.com", "password": "password123", "foto": "diego_foto_1.jpg", "intereses": "fotografia,viajar,cine,deportes,musica", "lat": -34.6037 + 0.008, "lon": -58.3816 + 0.004}
         ]
         
         # Setup specific registration dates per user to give realistic scheduling variations
@@ -130,11 +131,12 @@ class Seeder:
         for u in usuarios_data:
             pw_hash = self.hash_password(u["password"])
             fecha_reg = user_reg_dates[u["nombre"]]
+            u["fecha_nacimiento"] = date(today.year - u["edad"], today.month, today.day)
             pg_cur.execute("""
-                INSERT INTO usuarios (nombre, edad, genero, ubicacion, biografia, pref_edad_min, pref_edad_max, email, password_hash, fecha_registro)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO usuarios (nombre, fecha_nacimiento, genero, ubicacion, biografia, pref_edad_min, pref_edad_max, email, password_hash, fecha_registro, latitud, longitud)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id_usuario;
-            """, (u["nombre"], u["edad"], u["genero"], u["ubicacion"], u["biografia"], u["pref_edad_min"], u["pref_edad_max"], u["email"], pw_hash, fecha_reg))
+            """, (u["nombre"], u["fecha_nacimiento"], u["genero"], u["ubicacion"], u["biografia"], u["pref_edad_min"], u["pref_edad_max"], u["email"], pw_hash, fecha_reg, u["lat"], u["lon"]))
             uid = pg_cur.fetchone()[0]
             name_to_id[u["nombre"]] = uid
 
@@ -514,6 +516,7 @@ class Seeder:
                 MATCH (u1:Usuario {id_usuario: c.uid1})
                 MATCH (u2:Usuario {id_usuario: c.uid2})
                 MERGE (u1)-[:COINCIDIO_CON {fecha: datetime(c.fecha)}]->(u2)
+                MERGE (u2)-[:COINCIDIO_CON {fecha: datetime(c.fecha)}]->(u1)
             """, coins=[{"uid1": row[0], "uid2": row[1], "fecha": row[2].isoformat()} for row in coins_list])
 
             # 2.5 Nodos de Eventos y Relaciones
@@ -577,10 +580,11 @@ class Seeder:
         pg_cur = pg_conn.cursor()
 
         # 3.1 Perfiles públicos denormalizados
-        pg_cur.execute("SELECT id_usuario, nombre, edad, genero, ubicacion, biografia FROM usuarios;")
+        pg_cur.execute("SELECT id_usuario, nombre, fecha_nacimiento, genero, ubicacion, biografia, latitud, longitud FROM usuarios;")
         users_rows = pg_cur.fetchall()
         for u_row in users_rows:
-            uid, nombre, edad, genero, ubicacion, biografia = u_row
+            uid, nombre, fecha_nac, genero, ubicacion, biografia, lat, lon = u_row
+            edad_calc = today.year - fecha_nac.year - ((today.month, today.day) < (fecha_nac.month, fecha_nac.day))
             
             # Fetch interests
             pg_cur.execute("SELECT i.nombre FROM usuario_intereses ui JOIN intereses i ON ui.id_interes = i.id_interes WHERE ui.id_usuario = %s;", (uid,))
@@ -594,9 +598,12 @@ class Seeder:
             perfil_denorm = {
                 "id_usuario": uid,
                 "nombre": nombre,
-                "edad": edad,
+                "fecha_nacimiento": fecha_nac.strftime("%Y-%m-%d"),
+                "edad": edad_calc,
                 "genero": genero,
                 "ubicacion": ubicacion,
+                "latitud": lat,
+                "longitud": lon,
                 "biografia": biografia or "",
                 "intereses": ints,
                 "fotos": photos_list,
@@ -859,10 +866,16 @@ class Seeder:
         print("Sincronizando Redis...")
         r_client = get_redis_client()
         r_client.set("app_status", "initialized")
-        
-        # Populate Redis sorted set swipes rank for today
+
         pg_conn = get_postgres_connection()
         pg_cur = pg_conn.cursor()
+
+        # Index user locations in Redis geospatial index
+        pg_cur.execute("SELECT id_usuario, longitud, latitud FROM usuarios WHERE longitud IS NOT NULL AND latitud IS NOT NULL;")
+        for uid, lon, lat in pg_cur.fetchall():
+            r_client.geoadd("usuarios_ubicaciones", [float(lon), float(lat), str(uid)])
+        
+        # Populate Redis sorted set swipes rank for today
         pg_cur.execute("SELECT id_usuario_destino, count(*) FROM likes WHERE date(fecha_like) = %s GROUP BY id_usuario_destino;", (today,))
         for row in pg_cur.fetchall():
             dest_id, count = row
@@ -883,7 +896,7 @@ class Seeder:
         for uid in user_ids:
             # Set unread count (reset to 0 if not found)
             count = unread_counts.get(uid, 0)
-            r_client.set(f"notificaciones_cantidad:{uid}", count)
+            r_client.set(f"notificaciones_cantidad_sin_leer:{uid}", count)
             
             # Fetch the last 10 notifications for this user, sorted oldest first (ASC) for LPUSH
             pg_cur.execute("""

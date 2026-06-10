@@ -72,7 +72,7 @@ class EventService:
 
         # 4. Redis update for receptor
         try:
-            self.redis_repo.incrementar_notificaciones_cantidad(id_receptor)
+            self.redis_repo.incrementar_notificaciones_cantidad_sin_leer(id_receptor)
             user_organizador = self.pg_repo.obtener_usuario_por_id(id_organizador)
             self.redis_repo.agregar_notificacion_tipo(id_receptor, {
                 "id_notificacion": notif_id,
@@ -148,7 +148,7 @@ class EventService:
 
         # 5. Redis notify
         try:
-            self.redis_repo.incrementar_notificaciones_cantidad(id_organizador)
+            self.redis_repo.incrementar_notificaciones_cantidad_sin_leer(id_organizador)
             user_receptor = self.pg_repo.obtener_usuario_por_id(id_receptor)
             self.redis_repo.agregar_notificacion_tipo(id_organizador, {
                 "id_notificacion": notif_id,
@@ -206,7 +206,7 @@ class EventService:
 
         # 3. Redis notify
         try:
-            self.redis_repo.incrementar_notificaciones_cantidad(id_organizador)
+            self.redis_repo.incrementar_notificaciones_cantidad_sin_leer(id_organizador)
             user_receptor = self.pg_repo.obtener_usuario_por_id(id_receptor)
             self.redis_repo.agregar_notificacion_tipo(id_organizador, {
                 "id_notificacion": notif_id,
